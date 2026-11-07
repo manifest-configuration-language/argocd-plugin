@@ -45,7 +45,7 @@ emit regular
 }
 
 func TestGenerateKeepsBootstrapAsRegularResource(t *testing.T) {
-	t.Setenv("ARGOCD_APP_NAMESPACE", "default")
+	t.Parallel()
 
 	root := t.TempDir()
 	writeProjectFile(t, root, "main.mcl", `let bootstrapResource =
@@ -75,7 +75,7 @@ emit bootstrap
 	if err := generateFrom(t.Context(), root, "[]", &output); err != nil {
 		t.Fatalf("generateFrom() error = %v", err)
 	}
-	if !strings.Contains(output.String(), "kind: CustomResourceDefinition") || !strings.Contains(output.String(), "namespace: default") || !strings.Contains(output.String(), "argocd.argoproj.io/sync-wave: \"-1000\"") || strings.Contains(output.String(), "argocd.argoproj.io/hook:") {
+	if !strings.Contains(output.String(), "kind: CustomResourceDefinition") || strings.Contains(output.String(), "namespace: default") || !strings.Contains(output.String(), "argocd.argoproj.io/sync-wave: \"-1000\"") || strings.Contains(output.String(), "argocd.argoproj.io/hook:") {
 		t.Fatalf("bootstrap CRD was not kept as a regular resource:\n%s", output.String())
 	}
 }

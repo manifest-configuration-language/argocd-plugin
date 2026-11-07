@@ -92,7 +92,7 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 				if err != nil {
 					return err
 				}
-				applyDestinationNamespace(object, resourceID.scope, resourceID.namespace, destinationNamespace)
+				applyDestinationNamespace(object, resourceID.scope, resourceID.namespace)
 				identity := resourceID.key
 				if previousScope, exists := resourceScopes[resourceID.groupKindName]; exists && previousScope != resourceID.scope {
 					return fmt.Errorf("MCL operations resolve inconsistent resource scope for %s", resourceID.groupKindName)
@@ -159,23 +159,15 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 	return err
 }
 
-func applyDestinationNamespace(object map[string]any, scope resourceScope, namespace, destinationNamespace string) {
-	metadata, ok := object["metadata"].(map[string]any)
-	if !ok {
-		metadata = make(map[string]any)
-		object["metadata"] = metadata
-	}
-	if scope == resourceScopeNamespaced {
-		if namespace != "" {
-			metadata["namespace"] = namespace
-		}
-
+func applyDestinationNamespace(object map[string]any, scope resourceScope, namespace string) {
+	if scope != resourceScopeNamespaced || namespace == "" {
 		return
 	}
-	if scope == resourceScopeCluster && destinationNamespace != "" {
-		// Argo CD v3.6.1 adds tracking metadata only when namespace normalization changes a resource.
-		metadata["namespace"] = destinationNamespace
+	metadata, ok := object["metadata"].(map[string]any)
+	if !ok {
+		return
 	}
+	metadata["namespace"] = namespace
 }
 
 func operationsFor(options pluginOptions) []operationSpec {
