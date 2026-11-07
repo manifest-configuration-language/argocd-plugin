@@ -1,4 +1,4 @@
-emit
+let resource =
   apiVersion: "v1"
   kind: "ConfigMap"
   metadata:
@@ -6,3 +6,5 @@ emit
     namespace: "default"
   data:
     greeting: "hello from MCL"
+
+emit resource

@@ -15,21 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type lifecycleManifest struct {
-	Artifacts []lifecycleArtifact `json:"artifacts"`
-}
-type lifecycleArtifact struct {
-	Events    []string            `json:"events"`
-	Priority  int                 `json:"priority"`
-	Cleanup   []string            `json:"cleanup"`
-	Wait      bool                `json:"wait"`
-	Documents []documentReference `json:"documents"`
-}
-type documentReference struct {
-	File     string `json:"file"`
-	Document int    `json:"document"`
-}
-
 type renderedResource struct {
 	object   map[string]any
 	identity string
@@ -46,6 +31,10 @@ func Generate(ctx context.Context, encodedParameters string, output io.Writer) e
 	if err != nil {
 		return fmt.Errorf("get source directory: %w", err)
 	}
+	return generateFrom(ctx, root, encodedParameters, output)
+}
+
+func generateFrom(ctx context.Context, root, encodedParameters string, output io.Writer) error {
 	parameters, entrypoint, options, err := readParameters(encodedParameters, root)
 	if err != nil {
 		return err
@@ -57,18 +46,53 @@ func Generate(ctx context.Context, encodedParameters string, output io.Writer) e
 	if err := mcl.FetchFileWithParametersAndOptionsContext(ctx, entry, parameters, mcl.EvaluationOptions{}); err != nil {
 		return fmt.Errorf("fetch locked MCL dependencies: %w", err)
 	}
-	bundle, err := mcl.EvaluateFileWithParametersAndOptionsContext(ctx, entry, parameters, mcl.EvaluationOptions{})
-	if err != nil {
-		return fmt.Errorf("evaluate MCL project: %w", err)
-	}
 	resources := make(map[string]*renderedResource)
-	for _, operation := range []string{"create", "update", "delete", "rollback", "verify"} {
-		files, err := mcl.RenderOperation(bundle, operation)
+	operations := []struct {
+		name   string
+		phases []string
+	}{{"create", []string{"bootstrap", "before.create", "main", "after.create"}}, {"update", []string{"before.update", "main", "after.update"}}, {"delete", []string{"before.delete", "after.delete"}}, {"rollback", []string{"before.rollback", "after.rollback"}}}
+	if options.includeVerify {
+		operations = append(operations, struct {
+			name   string
+			phases []string
+		}{"verify", []string{"verify"}})
+	}
+	for _, operation := range operations {
+		bundle, err := mcl.EvaluateFileForOperationWithParametersAndOptionsContext(ctx, entry, operation.name, parameters, mcl.EvaluationOptions{})
 		if err != nil {
-			return fmt.Errorf("render MCL %s operation: %w", operation, err)
+			return fmt.Errorf("evaluate MCL %s operation: %w", operation.name, err)
 		}
-		if err := collectOperation(resources, operation, files, options); err != nil {
-			return err
+		for _, phase := range operation.phases {
+			artifacts, err := mcl.RenderPhaseArtifacts(bundle, phase)
+			if err != nil {
+				return fmt.Errorf("render MCL %s phase: %w", phase, err)
+			}
+			for _, artifact := range artifacts {
+				if strings.Contains(phase, "rollback") {
+					return fmt.Errorf("MCL lifecycle event %q has no Argo CD equivalent", phase)
+				}
+				if operation.name == "delete" && phase == "main" {
+					continue
+				}
+				var object map[string]any
+				if err := json.Unmarshal(artifact.Resource, &object); err != nil {
+					return fmt.Errorf("decode MCL resource in phase %q: %w", phase, err)
+				}
+				identity, err := resourceIdentity(object)
+				if err != nil {
+					return err
+				}
+				item := resources[identity]
+				if item == nil {
+					item = &renderedResource{object: object, identity: identity}
+					resources[identity] = item
+				} else if !equalYAML(item.object, object) {
+					return fmt.Errorf("MCL operations render conflicting contents for %s", identity)
+				}
+				if err := assignLifecycle(item, phase, artifact.Lifecycle); err != nil {
+					return fmt.Errorf("resource %s: %w", identity, err)
+				}
+			}
 		}
 	}
 	if len(resources) == 0 && !options.allowEmpty {
@@ -101,77 +125,6 @@ func Generate(ctx context.Context, encodedParameters string, output io.Writer) e
 	return err
 }
 
-func collectOperation(resources map[string]*renderedResource, operation string, files []mcl.RenderedFile, options pluginOptions) error {
-	contents := make(map[string][]map[string]any, len(files))
-	var metadata lifecycleManifest
-	for _, file := range files {
-		if file.Name == "lifecycle.json" {
-			if err := json.Unmarshal(file.Content, &metadata); err != nil {
-				return fmt.Errorf("decode MCL lifecycle metadata: %w", err)
-			}
-			continue
-		}
-		documents, err := decodeDocuments(file.Content)
-		if err != nil {
-			return fmt.Errorf("decode MCL output %s: %w", file.Name, err)
-		}
-		contents[file.Name] = documents
-	}
-	for _, artifact := range metadata.Artifacts {
-		for _, event := range artifact.Events {
-			if strings.Contains(event, "rollback") {
-				return fmt.Errorf("MCL lifecycle event %q has no Argo CD equivalent", event)
-			}
-		}
-		for _, ref := range artifact.Documents {
-			if operation == "delete" && ref.File == "main.yaml" {
-				continue
-			}
-			if operation == "rollback" || (ref.File == "verify.yaml" && !options.includeVerify) {
-				continue
-			}
-			documents, exists := contents[ref.File]
-			if !exists || ref.Document < 1 || ref.Document > len(documents) {
-				return fmt.Errorf("MCL lifecycle metadata references missing document %s#%d", ref.File, ref.Document)
-			}
-			object := documents[ref.Document-1]
-			identity, err := resourceIdentity(object)
-			if err != nil {
-				return err
-			}
-			item := resources[identity]
-			if item == nil {
-				item = &renderedResource{object: object, identity: identity}
-				resources[identity] = item
-			} else if !equalYAML(item.object, object) {
-				return fmt.Errorf("MCL create/update operations render conflicting contents for %s", identity)
-			}
-			if err := assignLifecycle(item, ref.File, artifact); err != nil {
-				return fmt.Errorf("resource %s: %w", identity, err)
-			}
-		}
-	}
-	return nil
-}
-
-func decodeDocuments(data []byte) ([]map[string]any, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	var documents []map[string]any
-	for {
-		var document map[string]any
-		err := decoder.Decode(&document)
-		if err == io.EOF {
-			return documents, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		if len(document) > 0 {
-			documents = append(documents, document)
-		}
-	}
-}
-
 func resourceIdentity(object map[string]any) (string, error) {
 	apiVersion, _ := object["apiVersion"].(string)
 	kind, _ := object["kind"].(string)
@@ -184,16 +137,14 @@ func resourceIdentity(object map[string]any) (string, error) {
 	return strings.Join([]string{apiVersion, kind, namespace, name}, "/"), nil
 }
 
-func assignLifecycle(item *renderedResource, file string, artifact lifecycleArtifact) error {
-	eventByFile := map[string]string{"bootstrap.yaml": "bootstrap", "before.yaml": "before", "main.yaml": "main", "after.yaml": "after", "verify.yaml": "verify"}
-	phase := eventByFile[file]
-	for _, event := range artifact.Events {
+func assignLifecycle(item *renderedResource, phase string, lifecycle mcl.Lifecycle) error {
+	for _, event := range lifecycle.Events {
 		if phase == "main" && event == "main" {
 			item.regular = true
 		}
 		if phase == "bootstrap" && event == "bootstrap" {
 			item.regular = true
-			wave := -1000 + artifact.Priority
+			wave := -1000 + lifecycle.Priority
 			if !item.waveSet || wave < item.wave {
 				item.wave = wave
 				item.waveSet = true
@@ -201,28 +152,28 @@ func assignLifecycle(item *renderedResource, file string, artifact lifecycleArti
 		}
 		var hook string
 		switch {
-		case phase == "before" && (event == "before.create" || event == "before.update"):
+		case (phase == "before.create" || phase == "before.update") && (event == "before.create" || event == "before.update"):
 			hook = "PreSync"
-		case phase == "after" && (event == "after.create" || event == "after.update"):
+		case (phase == "after.create" || phase == "after.update") && (event == "after.create" || event == "after.update"):
 			hook = "PostSync"
-		case phase == "before" && event == "before.delete":
+		case phase == "before.delete" && event == "before.delete":
 			hook = "PreDelete"
-		case phase == "after" && event == "after.delete":
+		case phase == "after.delete" && event == "after.delete":
 			hook = "PostDelete"
 		case phase == "verify" && event == "verify":
 			hook = "PostSync"
 		}
 		if hook != "" && !slices.Contains(item.hooks, hook) {
-			if item.waveSet && item.wave != artifact.Priority {
-				return fmt.Errorf("MCL lifecycle events assign conflicting sync waves %d and %d", item.wave, artifact.Priority)
+			if item.waveSet && item.wave != lifecycle.Priority {
+				return fmt.Errorf("MCL lifecycle events assign conflicting sync waves %d and %d", item.wave, lifecycle.Priority)
 			}
 			item.hooks = append(item.hooks, hook)
-			item.wave = artifact.Priority
+			item.wave = lifecycle.Priority
 			item.waveSet = true
 		}
 	}
-	if phase == "before" || phase == "after" || phase == "verify" {
-		item.cleanup = append(item.cleanup, artifact.Cleanup...)
+	if strings.HasPrefix(phase, "before.") || strings.HasPrefix(phase, "after.") || phase == "verify" {
+		item.cleanup = append(item.cleanup, lifecycle.Cleanup...)
 	}
 	return nil
 }
