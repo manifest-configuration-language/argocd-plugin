@@ -3,7 +3,6 @@ package plugin
 import (
 	"bytes"
 	"context"
-	"encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -75,8 +74,8 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 				if operation.name == "delete" && phase == "main" {
 					continue
 				}
-				var object map[string]any
-				if err := json.Unmarshal(artifact.Resource, &object); err != nil {
+				object, err := decodeResource(artifact.Resource)
+				if err != nil {
 					return fmt.Errorf("decode MCL resource in phase %q: %w", phase, err)
 				}
 				identity, err := resourceIdentity(object)
@@ -124,6 +123,19 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 	}
 	_, err = output.Write(rendered.Bytes())
 	return err
+}
+
+func decodeResource(data []byte) (map[string]any, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var object map[string]any
+	if err := decoder.Decode(&object); err != nil {
+		return nil, err
+	}
+	var extra map[string]any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("MCL artifact contains multiple JSON values")
+	}
+	return object, nil
 }
 
 func resourceIdentity(object map[string]any) (string, error) {
