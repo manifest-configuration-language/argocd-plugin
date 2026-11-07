@@ -247,10 +247,13 @@ func applyLifecycle(item *renderedResource) error {
 	if item.regular && len(item.hooks) > 0 {
 		return fmt.Errorf("resource is both a regular resource and an Argo CD hook")
 	}
-	if item.regular || len(item.hooks) == 0 || item.wave != 0 {
+	if item.waveSet {
 		if err := setAnnotation(annotations, "argocd.argoproj.io/sync-wave", fmt.Sprint(item.wave)); err != nil {
 			return err
 		}
+	}
+	if len(item.cleanup) > 0 && len(item.hooks) == 0 {
+		return fmt.Errorf("MCL cleanup policy is set on a resource without an Argo CD Hook")
 	}
 	var policies []string
 	for _, cleanup := range item.cleanup {

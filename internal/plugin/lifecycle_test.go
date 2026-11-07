@@ -13,7 +13,7 @@ func TestApplyLifecycle(t *testing.T) {
 		wantWave string
 		wantErr  string
 	}{
-		{name: "sync hook and cleanup", item: renderedResource{object: map[string]any{"metadata": map[string]any{"name": "job"}}, hooks: []string{"PreSync"}, cleanup: []string{"before-next-run", "on-success"}, wave: -2}, wantHook: "PreSync", wantWave: "-2"},
+		{name: "sync hook and cleanup", item: renderedResource{object: map[string]any{"metadata": map[string]any{"name": "job"}}, hooks: []string{"PreSync"}, cleanup: []string{"before-next-run", "on-success"}, wave: -2, waveSet: true}, wantHook: "PreSync", wantWave: "-2"},
 		{name: "multiple hook phases", item: renderedResource{object: map[string]any{"metadata": map[string]any{"name": "job"}}, hooks: []string{"PostSync", "PreSync"}}, wantHook: "PostSync,PreSync"},
 		{name: "annotation conflict", item: renderedResource{object: map[string]any{"metadata": map[string]any{"name": "job", "annotations": map[string]any{"argocd.argoproj.io/hook": "Sync"}}}, hooks: []string{"PreSync"}}, wantErr: "conflicts"},
 		{name: "regular resource cannot be hook", item: renderedResource{object: map[string]any{"metadata": map[string]any{"name": "job"}}, hooks: []string{"PreSync"}, regular: true}, wantErr: "both a regular resource"},
