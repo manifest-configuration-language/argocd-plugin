@@ -88,3 +88,15 @@ jobs:
           subject-name: ghcr.io/manifest-configuration-language/argocd-plugin
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+  release:
+    needs: publish
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
