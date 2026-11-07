@@ -9,3 +9,5 @@ Parameter errorでは、`ARGOCD_APP_PARAMETERS`から渡されるParameter名、
 Lifecycleエラーでは、同一ResourceをCreateとUpdateで異なる内容にしていないか、既存Argo CD Hook AnnotationとMCL Lifecycleが競合していないか確認してください。`bootstrap`とPreSync Hookは1つのApplicationでは順序を保証できません。Rollback LifecycleはArgo CD Hookへ変換できません。
 
 Argo CD v3.6.1のCMPはApplicationのDestination Namespaceを`ARGOCD_APP_NAMESPACE`で渡します。プラグインはNamespaced Resourceの省略Namespaceを補い、Cluster-scoped ResourceにもDestination Namespaceを一時的に付けて出力します。Argo CDはCluster-scoped ResourceのNamespaceを正規化で除去し、その正規化時にResource Tracking Annotationを付けます。
+
+Argo CD v3.6.1はApplicationのCascade Delete時にCRDを削除対象から除外します。CRDはApplication削除後もクラスタに残るため、CRDを別の管理対象として扱ってください。

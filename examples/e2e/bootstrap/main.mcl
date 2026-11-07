@@ -25,6 +25,16 @@ let crdResource =
                   value:
                     type: "string"
 let crd = lifecycle.attach(crdResource, ["bootstrap"], 0, true, [])
+let clusterRoleResource =
+  apiVersion: "rbac.authorization.k8s.io/v1"
+  kind: "ClusterRole"
+  metadata:
+    name: "mcl-e2e-bootstrap-review"
+  rules:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get"]
+let clusterRole = lifecycle.attach(clusterRoleResource, ["bootstrap"], 0, true, [])
 let widget =
   apiVersion: "e2e.example.com/v1"
   kind: "Widget"
@@ -33,4 +43,5 @@ let widget =
   spec:
     value: "created-after-crd"
 emit crd
+emit clusterRole
 emit widget
