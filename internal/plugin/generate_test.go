@@ -72,6 +72,62 @@ emit resource
 	}
 }
 
+func TestGenerateMapsHelmHooksToArgoCDHooks(t *testing.T) {
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", `let options =
+  kubeVersion: "1.36.0"
+  apiVersions:
+    - "apps/v1"
+  releaseName: "sample"
+  namespace: "default"
+let resources = helm.render("chart", options)
+emit resources
+`)
+	writeProjectFile(t, root, "chart/Chart.yaml", "apiVersion: v2\nname: sample\nversion: 0.1.0\n")
+	writeProjectFile(t, root, "chart/templates/migration.yaml", `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-migration
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-2"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migration
+          image: busybox:1.37.0
+          command: ["sh", "-c", "echo migrate"]
+`)
+	writeProjectFile(t, root, "chart/templates/configmap.yaml", `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}
+`)
+
+	var output bytes.Buffer
+	if err := generateFrom(t.Context(), root, "[]", &output); err != nil {
+		t.Fatalf("generateFrom() error = %v", err)
+	}
+	manifest := output.String()
+	for _, expected := range []string{
+		"argocd.argoproj.io/hook: PreSync",
+		"argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded",
+		"argocd.argoproj.io/sync-wave: \"-2\"",
+		"name: sample-migration",
+		"name: sample",
+	} {
+		if !strings.Contains(manifest, expected) {
+			t.Errorf("generated manifests do not contain %q:\n%s", expected, manifest)
+		}
+	}
+	if strings.Contains(manifest, "helm.sh/hook:") {
+		t.Fatalf("generated manifests retain Helm hook annotations:\n%s", manifest)
+	}
+}
+
 func TestAnnounceInputFilesIncludesMCLAndParameterInputs(t *testing.T) {
 	root := t.TempDir()
 	writeProjectFile(t, root, "mcl.toml", "")
