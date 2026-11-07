@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -21,6 +22,7 @@ type pluginOptions struct {
 	allowEmpty        bool
 	includeVerify     bool
 	kubernetesVersion string
+	parameterFiles    []string
 }
 
 const maxParameterFileSize = 64 << 20
@@ -133,6 +135,7 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 			return nil, "", options, err
 		}
 	}
+	options.parameterFiles = slices.Clone(parameterFiles)
 	if _, err := projectFile(root, entry); err != nil {
 		return nil, "", options, err
 	}

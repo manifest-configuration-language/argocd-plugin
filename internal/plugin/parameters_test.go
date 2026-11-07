@@ -73,7 +73,7 @@ func TestReadParametersAcceptsNoParameters(t *testing.T) {
 		if err != nil {
 			t.Fatalf("readParameters(%q) error = %v", input, err)
 		}
-		if len(values) != 0 || entry != "main.mcl" || options != (pluginOptions{}) {
+		if len(values) != 0 || entry != "main.mcl" || options.allowEmpty || options.includeVerify || options.kubernetesVersion != "" || len(options.parameterFiles) != 0 {
 			t.Fatalf("readParameters(%q) = %v, %q, %+v; want defaults", input, values, entry, options)
 		}
 	}

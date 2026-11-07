@@ -3,9 +3,12 @@ package plugin
 import (
 	"bytes"
 	"context"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
+	"path"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -22,6 +25,11 @@ type renderedResource struct {
 	wave     int
 	waveSet  bool
 	regular  bool
+}
+
+type operationSpec struct {
+	name   string
+	phases []string
 }
 
 // Generate evaluates the selected MCL project and writes a complete Argo CD manifest stream.
@@ -47,16 +55,7 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 		return fmt.Errorf("fetch locked MCL dependencies: %w", err)
 	}
 	resources := make(map[string]*renderedResource)
-	operations := []struct {
-		name   string
-		phases []string
-	}{{"create", []string{"bootstrap", "before.create", "main", "after.create"}}, {"update", []string{"before.update", "main", "after.update"}}, {"delete", []string{"before.delete", "after.delete"}}, {"rollback", []string{"before.rollback", "after.rollback"}}}
-	if options.includeVerify {
-		operations = append(operations, struct {
-			name   string
-			phases []string
-		}{"verify", []string{"verify"}})
-	}
+	operations := operationsFor(options)
 	for _, operation := range operations {
 		bundle, err := mcl.EvaluateFileForOperationWithParametersAndOptionsContext(ctx, entry, operation.name, parameters, evaluationOptions)
 		if err != nil {
@@ -123,6 +122,94 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 	}
 	_, err = output.Write(rendered.Bytes())
 	return err
+}
+
+func operationsFor(options pluginOptions) []operationSpec {
+	operations := []operationSpec{{"create", []string{"bootstrap", "before.create", "main", "after.create"}}, {"update", []string{"before.update", "main", "after.update"}}, {"delete", []string{"before.delete", "after.delete"}}, {"rollback", []string{"before.rollback", "after.rollback"}}}
+	if options.includeVerify {
+		operations = append(operations, operationSpec{"verify", []string{"verify"}})
+	}
+	return operations
+}
+
+// AnnounceInputFiles writes dynamic Argo CD parameters containing repository-relative MCL inputs.
+func AnnounceInputFiles(ctx context.Context, encodedParameters, sourcePath string, output io.Writer) error {
+	root, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get source directory: %w", err)
+	}
+	return announceInputFilesFrom(ctx, root, encodedParameters, sourcePath, output)
+}
+
+func announceInputFilesFrom(ctx context.Context, root, encodedParameters, sourcePath string, output io.Writer) error {
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve source directory: %w", err)
+	}
+	root = canonicalRoot
+	parameters, entrypoint, options, err := readParameters(encodedParameters, root)
+	if err != nil {
+		return err
+	}
+	entry, err := projectFile(root, entrypoint)
+	if err != nil {
+		return err
+	}
+	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion}
+	if err := mcl.FetchFileWithParametersAndOptionsContext(ctx, entry, parameters, evaluationOptions); err != nil {
+		return fmt.Errorf("fetch locked MCL dependencies: %w", err)
+	}
+	projectRoot := findProjectRoot(filepath.Dir(entry))
+	projectRootFromSource, err := filepath.Rel(root, projectRoot)
+	if err != nil {
+		return fmt.Errorf("resolve MCL project root: %w", err)
+	}
+	repoSourcePath := path.Clean(filepath.ToSlash(sourcePath))
+	if path.IsAbs(repoSourcePath) || repoSourcePath == ".." || strings.HasPrefix(repoSourcePath, "../") {
+		return fmt.Errorf("Argo CD source path must be repository-relative")
+	}
+	inputs := make(map[string]struct{})
+	for _, parameterFile := range options.parameterFiles {
+		inputs[filepath.ToSlash(parameterFile)] = struct{}{}
+	}
+	for _, operation := range operationsFor(options) {
+		_, readFiles, err := mcl.EvaluateFileForOperationWithParametersAndOptionsAndReadFilesContext(ctx, entry, operation.name, parameters, evaluationOptions)
+		if err != nil {
+			return fmt.Errorf("evaluate MCL %s operation: %w", operation.name, err)
+		}
+		for _, readFile := range readFiles {
+			inputFromSource := path.Clean(path.Join(filepath.ToSlash(projectRootFromSource), filepath.ToSlash(readFile)))
+			repoPath := path.Clean(path.Join(repoSourcePath, inputFromSource))
+			if repoPath == ".." || strings.HasPrefix(repoPath, "../") || path.IsAbs(repoPath) {
+				return fmt.Errorf("MCL input path %q escapes the Git repository", readFile)
+			}
+			inputs[inputFromSource] = struct{}{}
+		}
+	}
+	paths := make([]string, 0, len(inputs))
+	for input := range inputs {
+		paths = append(paths, input)
+	}
+	slices.Sort(paths)
+	encoded, err := json.Marshal([]map[string]any{{"name": "input-files", "title": "MCL input files", "array": paths, "collectionType": "array"}})
+	if err != nil {
+		return fmt.Errorf("encode dynamic parameter announcement: %w", err)
+	}
+	_, err = output.Write(encoded)
+	return err
+}
+
+func findProjectRoot(directory string) string {
+	for current := filepath.Clean(directory); ; current = filepath.Dir(current) {
+		info, err := os.Lstat(filepath.Join(current, "mcl.toml"))
+		if err == nil && info.Mode().IsRegular() {
+			return current
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return directory
+		}
+	}
 }
 
 func decodeResource(data []byte) (map[string]any, error) {

@@ -72,6 +72,32 @@ emit resource
 	}
 }
 
+func TestAnnounceInputFilesIncludesMCLAndParameterInputs(t *testing.T) {
+	root := t.TempDir()
+	writeProjectFile(t, root, "mcl.toml", "")
+	writeProjectFile(t, root, "apps/worker/main.mcl", `import "../../cluster.mcl" as cluster
+let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: cluster.name
+emit resource
+`)
+	writeProjectFile(t, root, "cluster.mcl", `export let name = "worker"
+`)
+	writeProjectFile(t, root, "apps/worker/params.json", `{}`)
+	var output bytes.Buffer
+	parameters := `[{"name":"parameter-files","array":["params.json"]}]`
+	if err := announceInputFilesFrom(t.Context(), filepath.Join(root, "apps/worker"), parameters, "apps/worker", &output); err != nil {
+		t.Fatalf("announceInputFilesFrom() error = %v", err)
+	}
+	for _, input := range []string{"../../cluster.mcl", "../../mcl.toml", "main.mcl", "params.json"} {
+		if !strings.Contains(output.String(), input) {
+			t.Errorf("dynamic announcement %s does not contain input %q", output.String(), input)
+		}
+	}
+}
+
 func TestGenerateRejectsCreateUpdateManifestDrift(t *testing.T) {
 	root := t.TempDir()
 	writeProjectFile(t, root, "main.mcl", `let options =

@@ -153,6 +153,10 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/manifest-configuration-language/mcl v0.4.7 h1:ldt5VNKu/PeelREWPw/MfjqEntdlO0viGo/oomHQNAM=
 github.com/manifest-configuration-language/mcl v0.4.7/go.mod h1:HE787r6aEO3AIBKr8AMg9Vf9c/6l6f66ugdA4+rPj9A=
+github.com/manifest-configuration-language/mcl v0.4.8-0.20261107172545-2eb67c2c9b8f h1:LulDhDtrvhDR91CEzwfcNxhB5PILB2ropJPhLNl7mGA=
+github.com/manifest-configuration-language/mcl v0.4.8-0.20261107172545-2eb67c2c9b8f/go.mod h1:HE787r6aEO3AIBKr8AMg9Vf9c/6l6f66ugdA4+rPj9A=
+github.com/manifest-configuration-language/mcl v0.4.8-0.20261107173137-392e20f6262a h1:9M5AzFTYW6B24BjYXZjx3ESKHBKR0xiZzRbrTT3gJWs=
+github.com/manifest-configuration-language/mcl v0.4.8-0.20261107173137-392e20f6262a/go.mod h1:HE787r6aEO3AIBKr8AMg9Vf9c/6l6f66ugdA4+rPj9A=
 github.com/mitchellh/copystructure v1.2.0 h1:vpKXTN4ewci03Vljg/q9QvCGUDttBOGBIa15WveJJGw=
 github.com/mitchellh/copystructure v1.2.0/go.mod h1:qLl+cE2AmVv+CoeAwDPye/v+N2HKCj9FbZEVFJRxO9s=
 github.com/mitchellh/reflectwalk v1.0.2 h1:G2LzWKi524PWgd3mLHV8Y5k7s6XUvT0Gef6zxSIeXaQ=
