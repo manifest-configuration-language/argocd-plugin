@@ -49,6 +49,7 @@ func Generate(ctx context.Context, encodedParameters string, output io.Writer) e
 }
 
 func generateFrom(ctx context.Context, root, encodedParameters string, output io.Writer) error {
+	destinationNamespace := os.Getenv("ARGOCD_APP_NAMESPACE")
 	parameters, options, err := readParameters(encodedParameters, root)
 	if err != nil {
 		return err
@@ -87,10 +88,11 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 				if err != nil {
 					return fmt.Errorf("decode MCL resource in phase %q: %w", phase, err)
 				}
-				resourceID, err := resourceIdentity(bundle, object, os.Getenv("ARGOCD_APP_DEST_NAMESPACE"))
+				resourceID, err := resourceIdentity(bundle, object, destinationNamespace)
 				if err != nil {
 					return err
 				}
+				applyDestinationNamespace(object, resourceID.scope, resourceID.namespace, destinationNamespace)
 				identity := resourceID.key
 				if previousScope, exists := resourceScopes[resourceID.groupKindName]; exists && previousScope != resourceID.scope {
 					return fmt.Errorf("MCL operations resolve inconsistent resource scope for %s", resourceID.groupKindName)
@@ -155,6 +157,25 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 	_, err = output.Write(rendered.Bytes())
 
 	return err
+}
+
+func applyDestinationNamespace(object map[string]any, scope resourceScope, namespace, destinationNamespace string) {
+	metadata, ok := object["metadata"].(map[string]any)
+	if !ok {
+		metadata = make(map[string]any)
+		object["metadata"] = metadata
+	}
+	if scope == resourceScopeNamespaced {
+		if namespace != "" {
+			metadata["namespace"] = namespace
+		}
+
+		return
+	}
+	if scope == resourceScopeCluster && destinationNamespace != "" {
+		// Argo CD v3.6.1 adds tracking metadata only when namespace normalization changes a resource.
+		metadata["namespace"] = destinationNamespace
+	}
 }
 
 func operationsFor(options pluginOptions) []operationSpec {

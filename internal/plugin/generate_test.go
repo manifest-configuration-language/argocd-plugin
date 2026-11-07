@@ -45,7 +45,7 @@ emit regular
 }
 
 func TestGenerateKeepsBootstrapAsRegularResource(t *testing.T) {
-	t.Parallel()
+	t.Setenv("ARGOCD_APP_NAMESPACE", "default")
 
 	root := t.TempDir()
 	writeProjectFile(t, root, "main.mcl", `let bootstrapResource =
@@ -75,8 +75,36 @@ emit bootstrap
 	if err := generateFrom(t.Context(), root, "[]", &output); err != nil {
 		t.Fatalf("generateFrom() error = %v", err)
 	}
-	if !strings.Contains(output.String(), "kind: CustomResourceDefinition") || !strings.Contains(output.String(), "argocd.argoproj.io/sync-wave: \"-1000\"") || strings.Contains(output.String(), "argocd.argoproj.io/hook:") {
+	if !strings.Contains(output.String(), "kind: CustomResourceDefinition") || !strings.Contains(output.String(), "namespace: default") || !strings.Contains(output.String(), "argocd.argoproj.io/sync-wave: \"-1000\"") || strings.Contains(output.String(), "argocd.argoproj.io/hook:") {
 		t.Fatalf("bootstrap CRD was not kept as a regular resource:\n%s", output.String())
+	}
+}
+
+func TestGenerateDeduplicatesResourcesUsingArgoDestinationNamespace(t *testing.T) {
+	t.Setenv("ARGOCD_APP_NAMESPACE", "default")
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", `let createResource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "shared"
+let updateResource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    namespace: "default"
+    name: "shared"
+let create = lifecycle.attach(createResource, ["before.create"], 0, true, [])
+let update = lifecycle.attach(updateResource, ["before.update"], 0, true, [])
+emit create
+emit update
+`)
+	var output bytes.Buffer
+	if err := generateFrom(t.Context(), root, "[]", &output); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(output.String(), "kind: ConfigMap") != 1 {
+		t.Fatalf("resources with omitted and explicit destination namespaces were not deduplicated:\n%s", output.String())
 	}
 }
 
