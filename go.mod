@@ -3,7 +3,7 @@ module github.com/manifest-configuration-language/argocd-plugin
 go 1.27.2
 
 require (
-	github.com/manifest-configuration-language/mcl v0.4.7-0.20261107154040-b35987b88f88
+	github.com/manifest-configuration-language/mcl v0.4.7
 	gopkg.in/yaml.v3 v3.0.1
 )
 
