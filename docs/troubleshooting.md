@@ -7,5 +7,3 @@ Parameter errorでは、`ARGOCD_APP_PARAMETERS`から渡されるParameter名、
 外部依存の取得に失敗した場合は、MCLの`mcl.lock`が存在し、LockのToolchainとDigestが正しいことを確認してください。10分の評価上限を使う場合は、Sidecarの`ARGOCD_EXEC_TIMEOUT`を`10m`にし、Repo ServerとApplication Controllerの`server.repo.server.timeout.seconds`と`controller.repo.server.timeout.seconds`を660秒以上に設定します。
 
 Lifecycleエラーでは、同一ResourceをCreateとUpdateで異なる内容にしていないか、既存Argo CD Hook AnnotationとMCL Lifecycleが競合していないか確認してください。`bootstrap`とPreSync Hookは1つのApplicationでは順序を保証できません。Rollback LifecycleはArgo CD Hookへ変換できません。
-
-Argo CD v3.6.1はNamespaceを正規化したResourceに追跡Annotationを設定します。CRDなどのCluster-scoped ResourceでApplication削除時のPruneを有効にする場合は、Argo CDのNamespace正規化を通すため、Manifestの`metadata.namespace`にApplicationのDestination Namespaceを指定してください。Argo CDはCluster-scoped Resourceを適用するときにNamespaceを除去します。
