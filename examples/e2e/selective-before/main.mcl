@@ -1,0 +1,23 @@
+let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "mcl-e2e-selective"
+  data:
+    value: "before"
+let hookResource =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    name: "mcl-e2e-selective-hook"
+  spec:
+    template:
+      spec:
+        restartPolicy: "Never"
+        containers:
+          - name: "selective-hook"
+            image: "busybox:1.37.0"
+            command: ["sh", "-c", "echo selective-hook"]
+let hook = lifecycle.attach(hookResource, ["before.create", "before.update"], 0, true, ["before-next-run", "on-success"])
+emit resource
+emit hook

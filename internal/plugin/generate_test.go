@@ -2,9 +2,12 @@ package plugin
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -282,6 +285,102 @@ func TestGenerateRequiresExplicitEmptyOutputOptIn(t *testing.T) {
 	}
 	if output.Len() != 0 {
 		t.Fatalf("allowed empty output contains %q", output.String())
+	}
+}
+
+func TestGenerateIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", `let first =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "first"
+  data:
+    value: "stable"
+let second =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "second"
+  data:
+    value: "stable"
+emit second
+emit first
+`)
+
+	var first, second bytes.Buffer
+	if err := generateFrom(t.Context(), root, "[]", &first); err != nil {
+		t.Fatalf("first generateFrom() error = %v", err)
+	}
+	if err := generateFrom(t.Context(), root, "[]", &second); err != nil {
+		t.Fatalf("second generateFrom() error = %v", err)
+	}
+	if !bytes.Equal(first.Bytes(), second.Bytes()) {
+		t.Fatalf("generateFrom() output changed for identical input:\nfirst:\n%s\nsecond:\n%s", first.String(), second.String())
+	}
+}
+
+func TestGenerateConcurrentProjectsShareCache(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "mcl-cache")
+	t.Setenv("MCL_CACHE_DIRECTORY", cache)
+
+	const projectCount = 8
+	roots := make([]string, projectCount)
+	for index := range roots {
+		roots[index] = t.TempDir()
+		writeProjectFile(t, roots[index], "main.mcl", `let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "concurrent"
+emit resource
+`)
+	}
+
+	errors := make(chan error, projectCount)
+	var workers sync.WaitGroup
+	for _, root := range roots {
+		workers.Go(func() {
+			var output bytes.Buffer
+			if err := generateFrom(t.Context(), root, "[]", &output); err != nil {
+				errors <- err
+
+				return
+			}
+			if !strings.Contains(output.String(), "name: concurrent") {
+				errors <- fmt.Errorf("generateFrom() output is missing the ConfigMap: %s", output.String())
+			}
+		})
+	}
+	workers.Wait()
+	close(errors)
+	for err := range errors {
+		t.Error(err)
+	}
+}
+
+func TestGenerateCanceledContextDoesNotWritePartialManifest(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", `let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "canceled"
+emit resource
+`)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var output bytes.Buffer
+	if err := generateFrom(ctx, root, "[]", &output); err == nil {
+		t.Fatal("generateFrom() accepted a canceled Context")
+	}
+	if output.Len() != 0 {
+		t.Fatalf("generateFrom() wrote partial output after cancellation: %s", output.String())
 	}
 }
 

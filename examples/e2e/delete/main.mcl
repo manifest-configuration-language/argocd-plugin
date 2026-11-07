@@ -1,0 +1,38 @@
+let stable =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "mcl-e2e-stable"
+  data:
+    value: "delete-with-application"
+let beforeDeleteResource =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    name: "mcl-e2e-before-delete"
+  spec:
+    template:
+      spec:
+        restartPolicy: "Never"
+        containers:
+          - name: "before-delete"
+            image: "busybox:1.37.0"
+            command: ["sh", "-c", "echo before-delete"]
+let afterDeleteResource =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    name: "mcl-e2e-after-delete"
+  spec:
+    template:
+      spec:
+        restartPolicy: "Never"
+        containers:
+          - name: "after-delete"
+            image: "busybox:1.37.0"
+            command: ["sh", "-c", "echo after-delete"]
+let beforeDelete = lifecycle.attach(beforeDeleteResource, ["before.delete"], 0, true, [])
+let afterDelete = lifecycle.attach(afterDeleteResource, ["after.delete"], 1, true, [])
+emit stable
+emit beforeDelete
+emit afterDelete

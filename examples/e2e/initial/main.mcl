@@ -1,0 +1,16 @@
+let stable =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "mcl-e2e-stable"
+  data:
+    value: "before"
+let stale =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "mcl-e2e-stale"
+  data:
+    value: "remove-after-update"
+emit stable
+emit stale

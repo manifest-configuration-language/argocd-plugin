@@ -1,0 +1,8 @@
+let stable =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "mcl-e2e-stable"
+  data:
+    value: "after"
+emit stable
