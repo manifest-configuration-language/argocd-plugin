@@ -11,6 +11,7 @@ CMP Plugin名は`mcl`です。Applicationのsourceには`plugin: {}`を設定す
 | `parameters` | string | `{}` | MCLへ渡すJSONオブジェクト |
 | `allow-empty` | string | `false` | 空Manifestを許可 |
 | `include-verify` | string | `false` | `verify`イベントをPostSync Hookに含める |
+| `kubernetes-version` | string | MCL既定値 | MCLの静的Kubernetes Schema検証に使うversion |
 
 Parameter Announcementの既定値はArgo CDから実行時パラメータとして渡らないため、プラグインが既定値を適用します。ファイルパスは相対パスに限定し、Symlinkを解決した後にソースディレクトリ内であることを検証します。重複キー、未知のPlugin Parameter、無効なJSONはエラーです。
 

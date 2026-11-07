@@ -50,7 +50,7 @@ spec:
           string: '{"namespace":"example"}'
 ```
 
-`entrypoint`はデフォルトで`main.mcl`です。`parameter-files`はJSONオブジェクトを含むファイルの配列で、`parameters`はJSONオブジェクト文字列です。`allow-empty`と`include-verify`は`true`または`false`を指定します。複数の入力で同じキーを指定するとエラーになります。パスはApplicationのソースディレクトリ内に限定され、Symlinkによるディレクトリ外参照も拒否します。
+`entrypoint`はデフォルトで`main.mcl`です。`parameter-files`はJSONオブジェクトを含むファイルの配列で、`parameters`はJSONオブジェクト文字列です。`allow-empty`と`include-verify`は`true`または`false`を指定します。`kubernetes-version`を指定するとMCLがそのKubernetes Schemaで検証します。複数の入力で同じキーを指定するとエラーになります。パスはApplicationのソースディレクトリ内に限定され、Symlinkによるディレクトリ外参照も拒否します。
 
 ## Lifecycle変換
 

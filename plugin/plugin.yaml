@@ -26,5 +26,7 @@ spec:
       - name: include-verify
         title: Include verify Hooks
         string: 'false'
+      - name: kubernetes-version
+        title: Kubernetes schema version
   preserveFileMode: false
   provideGitCreds: false

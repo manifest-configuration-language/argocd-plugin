@@ -43,7 +43,8 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 	if err != nil {
 		return err
 	}
-	if err := mcl.FetchFileWithParametersAndOptionsContext(ctx, entry, parameters, mcl.EvaluationOptions{}); err != nil {
+	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion}
+	if err := mcl.FetchFileWithParametersAndOptionsContext(ctx, entry, parameters, evaluationOptions); err != nil {
 		return fmt.Errorf("fetch locked MCL dependencies: %w", err)
 	}
 	resources := make(map[string]*renderedResource)
@@ -58,7 +59,7 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 		}{"verify", []string{"verify"}})
 	}
 	for _, operation := range operations {
-		bundle, err := mcl.EvaluateFileForOperationWithParametersAndOptionsContext(ctx, entry, operation.name, parameters, mcl.EvaluationOptions{})
+		bundle, err := mcl.EvaluateFileForOperationWithParametersAndOptionsContext(ctx, entry, operation.name, parameters, evaluationOptions)
 		if err != nil {
 			return fmt.Errorf("evaluate MCL %s operation: %w", operation.name, err)
 		}

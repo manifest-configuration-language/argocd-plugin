@@ -18,8 +18,9 @@ type announcedParameter struct {
 }
 
 type pluginOptions struct {
-	allowEmpty    bool
-	includeVerify bool
+	allowEmpty        bool
+	includeVerify     bool
+	kubernetesVersion string
 }
 
 const maxParameterFileSize = 64 << 20
@@ -89,6 +90,14 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 			} else {
 				options.includeVerify = value
 			}
+		case "kubernetes-version":
+			if err := requireParameterShape(parameter, "string"); err != nil {
+				return nil, "", options, err
+			}
+			if *parameter.String == "" {
+				return nil, "", options, fmt.Errorf("kubernetes-version must not be empty")
+			}
+			options.kubernetesVersion = *parameter.String
 		default:
 			return nil, "", options, fmt.Errorf("unsupported Argo CD parameter %q", parameter.Name)
 		}
