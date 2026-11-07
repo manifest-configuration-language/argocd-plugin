@@ -6,6 +6,8 @@ MCL Argo CD PluginはArgo CD Config Management Plugin SidecarとしてMCLプロ�
 
 Argo CD Helm Chartの`repoServer.extraContainers`へSidecarを追加し、共有ソケットと独立した一時領域をマウントしてください。SidecarのUIDは999で実行します。
 
+現時点では公開ReleaseとGHCRイメージがないため、以下の`v1.0.0`は仮値です。公開後に実際のRelease tagまたは検証済みDigestへ置き換えてください。
+
 ```yaml
 repoServer:
   volumes:

@@ -2,6 +2,8 @@
 
 Argo CD v3.6.1のrepo-serverへCMP Sidecarを追加します。イメージはリリースタグまたは検証済みのマルチアーキテクチャDigestで固定してください。リリースイメージはGHCRで公開し、署名、SBOM、Provenanceを添付します。
 
+現時点では公開ReleaseとGHCRイメージがありません。READMEとKustomize Patchに記載された`v1.0.0`は仮値なので、公開後に実際のRelease tagまたは検証済みDigestへ置き換えてください。
+
 Helm Chartを使う場合は[README](../README.md)のValuesを`repoServer.extraContainers`へ設定します。Helmを使わない場合は、既存overlayの`kustomization.yaml`に次のPatchを追加し、[argocd-repo-server-patch.yaml](../examples/install/kustomize/argocd-repo-server-patch.yaml)を参照してください。
 
 ```yaml
