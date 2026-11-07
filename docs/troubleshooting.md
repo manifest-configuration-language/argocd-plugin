@@ -1,9 +1,9 @@
 # トラブルシューティング
 
-Plugin名が見つからない場合は、Applicationのsource path直下に`main.mcl`があるか確認してください。Entrypointを変更した場合は`entrypoint` Parameterがファイル名と一致する必要があります。
+Plugin名が見つからない場合は、Applicationのsource path直下に`main.mcl`があるか確認してください。プラグインは`main.mcl`をEntrypointとして使用します。
 
-Parameter errorでは、`ARGOCD_APP_PARAMETERS`から渡されるParameter名、JSON形式、重複キー、ファイルパスを確認してください。JSONファイルとEntrypointはApplicationソースディレクトリ外を参照できません。
+Parameter errorでは、`ARGOCD_APP_PARAMETERS`から渡されるParameter名、JSON形式、重複キー、ファイルパスを確認してください。JSONファイルはApplicationソースディレクトリ外を参照できません。
 
-外部依存の取得に失敗した場合は、MCLの`mcl.lock`が存在し、LockのToolchainとDigestが正しいことを確認してください。Argo CD repo-serverのTimeoutが10分より短い場合は、`server.repo.server.timeout.seconds`と`controller.repo.server.timeout.seconds`をPlugin実行時間に合わせて設定します。
+外部依存の取得に失敗した場合は、MCLの`mcl.lock`が存在し、LockのToolchainとDigestが正しいことを確認してください。10分の評価上限を使う場合は、Sidecarの`ARGOCD_EXEC_TIMEOUT`を`10m`にし、Repo ServerとApplication Controllerの`server.repo.server.timeout.seconds`と`controller.repo.server.timeout.seconds`を660秒以上に設定します。
 
-Lifecycleエラーでは、同一ResourceをCreateとUpdateで異なる内容にしていないか、既存Argo CD Hook AnnotationとMCL Lifecycleが競合していないか確認してください。Rollback LifecycleはArgo CD Hookへ変換できません。
+Lifecycleエラーでは、同一ResourceをCreateとUpdateで異なる内容にしていないか、既存Argo CD Hook AnnotationとMCL Lifecycleが競合していないか確認してください。`bootstrap`とPreSync Hookは1つのApplicationでは順序を保証できません。Rollback LifecycleはArgo CD Hookへ変換できません。

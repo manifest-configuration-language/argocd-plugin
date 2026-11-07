@@ -17,12 +17,9 @@ RUN if [ "$MCL_LEGACY_SDK" = "true" ]; then \
 RUN cp plugin/plugin.yaml /out/plugin.yaml && \
     if [ -n "$MCL_PLUGIN_VERSION" ]; then sed -i "/^spec:/a\\  version: $MCL_PLUGIN_VERSION" /out/plugin.yaml; fi
 
-FROM quay.io/argoproj/argocd:v3.6.1 AS argocd
-
 FROM gcr.io/distroless/static-debian13:nonroot
-COPY --from=argocd /usr/local/bin/argocd-cmp-server /var/run/argocd/argocd-cmp-server
 COPY --from=build /out/mcl-argocd /usr/local/bin/mcl-argocd
 COPY --from=build /out/plugin.yaml /home/argocd/cmp-server/config/plugin.yaml
 USER 999:999
-ENV XDG_CACHE_HOME=/tmp/mcl-cache
+ENV MCL_CACHE_DIRECTORY=/tmp/mcl-cache
 ENTRYPOINT ["/var/run/argocd/argocd-cmp-server"]

@@ -14,4 +14,8 @@ Lifecycle付きArtifactをCreate、Update、Delete操作としてMCLにレンダ
 
 `before-next-run`、`on-success`、`on-failure`を`BeforeHookCreation`、`HookSucceeded`、`HookFailed`へ変換します。MCL Hook Priorityは`argocd.argoproj.io/sync-wave`へ設定します。HookのAnnotationに既存値がある場合、MCLが出す値と一致しなければエラーです。
 
+Argo CDはSync PhaseをSync Waveより先に実行します。そのため、通常Resourceとして適用する`bootstrap`は、どのWaveを指定しても`PreSync` Hookより先には実行できません。同じApplicationにBootstrap ResourceとPreSync Hookがある場合は、実行順序を保証できないため生成を失敗させます。CRDなどのBootstrap Resourceと、それに依存するHookは別Applicationに配置してください。CRDをHookにすると通常ResourceのTrackingやPruneの動作が変わるため、プラグインはCRDをHookへ変換しません。
+
+Argo CDはHookの実行完了とSync Wave間でResource Healthを待ちます。MCL Lifecycleで`wait: false`を指定してこの待機を無効化する意味をArgo CDへ変換できないため、`bootstrap`またはHookイベントに`wait: false`が設定されている場合は生成を失敗させます。`main` Resourceの待機とSync状態はArgo CDの標準動作に従います。
+
 Argo CDはSelective SyncでSync Hookを実行しません。`PreDelete`と`PostDelete`はApplication削除時のHookであり、通常のPruneでは実行されません。Hook Cleanupの実際の削除タイミングはArgo CDのHook動作に従います。

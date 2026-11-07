@@ -11,7 +11,7 @@ repoServer:
   volumes:
     - name: mcl-tmp
       emptyDir:
-        sizeLimit: 1Gi
+        sizeLimit: 4Gi
   extraContainers:
     - name: mcl
       image: ghcr.io/manifest-configuration-language/argocd-plugin:v1.0.0
@@ -33,6 +33,15 @@ repoServer:
           mountPath: /home/argocd/cmp-server/plugins
         - name: mcl-tmp
           mountPath: /tmp
+      env:
+        - name: ARGOCD_EXEC_TIMEOUT
+          value: 10m
+        - name: MCL_CACHE_DIRECTORY
+          value: /tmp/mcl-cache
+configs:
+  params:
+    server.repo.server.timeout.seconds: "660"
+    controller.repo.server.timeout.seconds: "660"
 ```
 
 各Applicationのソースディレクトリに`main.mcl`を置きます。Applicationは`plugin: {}`で自動検出できます。
@@ -50,15 +59,21 @@ spec:
           string: '{"namespace":"example"}'
 ```
 
-`entrypoint`はデフォルトで`main.mcl`です。`parameter-files`はJSONオブジェクトを含むファイルの配列で、`parameters`はJSONオブジェクト文字列です。`allow-empty`と`include-verify`は`true`または`false`を指定します。`kubernetes-version`を指定するとMCLがそのKubernetes Schemaで検証します。複数の入力で同じキーを指定するとエラーになります。パスはApplicationのソースディレクトリ内に限定され、Symlinkによるディレクトリ外参照も拒否します。
+`main.mcl`をEntrypointとして使用します。`parameter-files`はJSONオブジェクトを含むファイルの配列で、`parameters`はJSONオブジェクト文字列です。`allow-empty`と`include-verify`は`true`または`false`を指定します。`kubernetes-version`を指定するとMCLがそのKubernetes Schemaで検証します。複数の入力で同じキーを指定するとエラーになります。パラメータファイルはApplicationのソースディレクトリ内に限定し、Symlinkによるディレクトリ外参照も拒否します。
+
+CMPコマンドは既定の90秒制限より長い評価時間を必要とするため、Sidecarへ`ARGOCD_EXEC_TIMEOUT=10m`を設定し、Application ControllerとRepo Serverのtimeoutを10分より長く設定してください。上の例は10分のMCL Context deadlineに対して両方を660秒にしています。値を変更する場合は3つの制限を揃えてください。
 
 ## Lifecycle変換
 
-`bootstrap`は通常リソースとして負のSync Waveを使い、`before.create`と`before.update`は`PreSync`、`after.create`と`after.update`は`PostSync`へ変換します。`before.delete`と`after.delete`は`PreDelete`と`PostDelete`へ変換します。RollbackイベントはArgo CDに対応するイベントがないためエラーになります。`verify`イベントはデフォルトで生成物に含めず、`include-verify: 'true'`を指定した場合は`PostSync` Hookに変換します。空出力はPrune事故防止のためエラーになり、意図的に空出力を使う場合だけ`allow-empty: 'true'`を指定します。
+`bootstrap`は通常リソースとして負のSync Waveを使い、`before.create`と`before.update`は`PreSync`、`after.create`と`after.update`は`PostSync`へ変換します。Argo CDはSync PhaseをSync Waveより先に実行するため、`bootstrap`と`PreSync` Hookを同じApplicationに出力するとエラーになります。CRDなどのBootstrap Resourceと、それに依存するHookは別Applicationへ分けてください。`before.delete`と`after.delete`は`PreDelete`と`PostDelete`へ変換します。RollbackイベントはArgo CDに対応するイベントがないためエラーになります。`verify`イベントはデフォルトで生成物に含めず、`include-verify: 'true'`を指定した場合は`PostSync` Hookに変換します。空出力はPrune事故防止のためエラーになり、意図的に空出力を使う場合だけ`allow-empty: 'true'`を指定します。HookやBootstrapの`wait`を`false`にするとArgo CDの待機動作と一致しないため、生成をエラーにします。
 
 同じリソースをCreateとUpdateで異なる内容に評価した場合や、既存のArgo CD Lifecycle AnnotationがMCLの値と矛盾する場合はエラーになります。HookのCleanupは`BeforeHookCreation`、`HookSucceeded`、`HookFailed`へ変換します。
 
 Argo CDはSelective SyncでSync Hookを実行しません。Prune、Diff、Health、Resource Tracking、Sync OptionsはArgo CD標準の動作に従います。
+
+## 入力ファイル追跡
+
+`mcl-argocd inputs`は`main.mcl`、指定した`parameter-files`、MCL評価で読み込んだファイルをセミコロン区切りで出力します。出力はApplicationのsource pathを基準にする`argocd.argoproj.io/manifest-generate-paths`の値として使えます。入力一覧はUIパラメータとしてAnnouncementしません。
 
 ## セキュリティと制約
 

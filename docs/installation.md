@@ -9,10 +9,14 @@ patches:
   - path: argocd-repo-server-patch.yaml
 ```
 
-Patchはrepo-server DeploymentにSidecarと専用`/tmp` volumeを追加します。SidecarはUID 999、Read-only Root Filesystem、Capabilitiesなし、`RuntimeDefault` seccompで動作します。CMP Serverはイメージ内の`/var/run/argocd/argocd-cmp-server`から起動し、設定ファイルはイメージ内の`/home/argocd/cmp-server/config/plugin.yaml`にあります。
+Patchはrepo-server DeploymentにSidecarとサイズ上限付きの専用`/tmp` volumeを追加します。SidecarはUID 999、Read-only Root Filesystem、Capabilitiesなし、`RuntimeDefault` seccompで動作します。Argo CD Helm Chartの`copyutil` Init Containerが`var-files` volumeへ配置する`/var/run/argocd/argocd-cmp-server`からCMP Serverを起動します。インストール時は`copyutil` Init Containerを維持してください。プラグイン設定はイメージ内の`/home/argocd/cmp-server/config/plugin.yaml`にあります。
+
+Sidecarでは`ARGOCD_EXEC_TIMEOUT=10m`を設定し、`MCL_CACHE_DIRECTORY=/tmp/mcl-cache`を依存Cacheに使います。専用`/tmp` volumeの`sizeLimit`はCacheと一時ファイルの合計上限です。実際の依存量に合わせてサイズを調整してください。
+
+CMPのコマンドタイムアウトは既定90秒、Application ControllerとRepo ServerのRPC timeoutは既定60秒です。MCLの評価上限10分を使うには、Helm Valuesの`configs.params`で`server.repo.server.timeout.seconds`と`controller.repo.server.timeout.seconds`を10分より長い秒数に設定してください。例として660秒を使います。Sidecar、Repo Server、Application Controllerの設定を揃えないと、MCLのContext deadline前にArgo CDが実行を終了します。
 
 ## Application
 
-ソースディレクトリに`main.mcl`を配置すればPlugin名の自動検出を使えます。エントリポイントを変更する場合は`entrypoint`パラメータを渡してください。`parameter-files`にはソースディレクトリ内のJSONファイル名を配列で指定し、`parameters`には型を保持したJSONオブジェクト文字列を指定します。
+ソースディレクトリに`main.mcl`を配置すればPlugin名の自動検出を使えます。プラグインは常に`main.mcl`を読み込みます。`parameter-files`にはソースディレクトリ内のJSONファイル名を配列で指定し、`parameters`には型を保持したJSONオブジェクト文字列を指定します。
 
 MCLの外部依存は`mcl.lock`に記録されたDigestを使って取得します。依存Lockを更新する変更は通常のソース変更としてレビューし、Argo CDのManifest生成中にLockを更新しません。

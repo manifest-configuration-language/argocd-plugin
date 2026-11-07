@@ -19,20 +19,13 @@ func TestGenerateRendersLifecycleAndOrdinaryResources(t *testing.T) {
   kind: "ConfigMap"
   metadata:
     name: "hook"
-let hook = lifecycle.attach(resource, ["before.create"], 2, false, ["on-success"])
-let bootstrapResource =
-  apiVersion: "v1"
-  kind: "ConfigMap"
-  metadata:
-    name: "bootstrap"
-let bootstrap = lifecycle.attach(bootstrapResource, ["bootstrap"], 0, false, [])
+let hook = lifecycle.attach(resource, ["before.create"], 2, true, ["on-success"])
 let regular =
   apiVersion: "v1"
   kind: "ConfigMap"
   metadata:
     name: "regular"
 emit hook
-emit bootstrap
 emit regular
 `)
 	var output bytes.Buffer
@@ -46,8 +39,84 @@ emit regular
 	if strings.Contains(manifest, "argocd.argoproj.io/sync-wave: \"0\"") {
 		t.Fatalf("ordinary resource received an unnecessary Sync Wave:\n%s", manifest)
 	}
-	if !strings.Contains(manifest, "argocd.argoproj.io/sync-wave: \"-1000\"") {
-		t.Fatalf("bootstrap resource did not receive the leading Sync Wave:\n%s", manifest)
+}
+
+func TestGenerateKeepsBootstrapAsRegularResource(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", `let bootstrapResource =
+  apiVersion: "apiextensions.k8s.io/v1"
+  kind: "CustomResourceDefinition"
+  metadata:
+    name: "widgets.example.test"
+  spec:
+    group: "example.test"
+    scope: "Namespaced"
+    names:
+      plural: "widgets"
+      singular: "widget"
+      kind: "Widget"
+      listKind: "WidgetList"
+    versions:
+      - name: "v1"
+        served: true
+        storage: true
+        schema:
+          openAPIV3Schema:
+            type: "object"
+let bootstrap = lifecycle.attach(bootstrapResource, ["bootstrap"], 0, true, [])
+emit bootstrap
+`)
+	var output bytes.Buffer
+	if err := generateFrom(t.Context(), root, "[]", &output); err != nil {
+		t.Fatalf("generateFrom() error = %v", err)
+	}
+	if !strings.Contains(output.String(), "kind: CustomResourceDefinition") || !strings.Contains(output.String(), "argocd.argoproj.io/sync-wave: \"-1000\"") || strings.Contains(output.String(), "argocd.argoproj.io/hook:") {
+		t.Fatalf("bootstrap CRD was not kept as a regular resource:\n%s", output.String())
+	}
+}
+
+func TestGenerateRejectsBootstrapAndPreSyncInOneApplication(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", `let bootstrapResource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "bootstrap"
+let bootstrap = lifecycle.attach(bootstrapResource, ["bootstrap"], 0, true, [])
+let hookResource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "pre-sync"
+let hook = lifecycle.attach(hookResource, ["before.create"], 0, true, [])
+emit bootstrap
+emit hook
+`)
+	err := generateFrom(t.Context(), root, "[]", &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "cannot run before PreSync hooks") {
+		t.Fatalf("generateFrom() error = %v, want Bootstrap and PreSync ordering diagnostic", err)
+	}
+}
+
+func TestGenerateRejectsUnsupportedLifecycleWaitSemantics(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", `let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "pre-sync"
+let hook = lifecycle.attach(resource, ["before.create"], 0, false, [])
+emit hook
+`)
+	err := generateFrom(t.Context(), root, "[]", &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "wait=false") {
+		t.Fatalf("generateFrom() error = %v, want unsupported wait semantics diagnostic", err)
 	}
 }
 
@@ -135,7 +204,7 @@ metadata:
 	}
 }
 
-func TestAnnounceInputFilesIncludesMCLAndParameterInputs(t *testing.T) {
+func TestListInputFilesIncludesMCLAndParameterInputs(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -153,8 +222,8 @@ emit resource
 	writeProjectFile(t, root, "apps/worker/params.json", `{}`)
 	var output bytes.Buffer
 	parameters := `[{"name":"parameter-files","array":["params.json"]}]`
-	if err := announceInputFilesFrom(t.Context(), filepath.Join(root, "apps/worker"), parameters, "apps/worker", &output); err != nil {
-		t.Fatalf("announceInputFilesFrom() error = %v", err)
+	if err := listInputFilesFrom(t.Context(), filepath.Join(root, "apps/worker"), parameters, "apps/worker", &output); err != nil {
+		t.Fatalf("listInputFilesFrom() error = %v", err)
 	}
 	inputs := []string{"main.mcl", "params.json"}
 	if readFilesAvailable {
@@ -162,8 +231,14 @@ emit resource
 	}
 	for _, input := range inputs {
 		if !strings.Contains(output.String(), input) {
-			t.Errorf("dynamic announcement %s does not contain input %q", output.String(), input)
+			t.Errorf("input list %s does not contain input %q", output.String(), input)
 		}
+	}
+	if !strings.HasSuffix(output.String(), "\n") {
+		t.Fatalf("input list %q does not end in a newline", output.String())
+	}
+	if readFilesAvailable && !strings.Contains(output.String(), "../../cluster.mcl") {
+		t.Errorf("input list %q does not contain the monorepo import relative to the Application source", output.String())
 	}
 }
 
@@ -229,9 +304,9 @@ let verifyResource =
   kind: "ConfigMap"
   metadata:
     name: "verify"
-let beforeDelete = lifecycle.attach(beforeDeleteResource, ["before.delete"], 1, false, [])
-let afterDelete = lifecycle.attach(afterDeleteResource, ["after.delete"], 2, false, [])
-let verify = lifecycle.attach(verifyResource, ["verify"], 3, false, [])
+let beforeDelete = lifecycle.attach(beforeDeleteResource, ["before.delete"], 1, true, [])
+let afterDelete = lifecycle.attach(afterDeleteResource, ["after.delete"], 2, true, [])
+let verify = lifecycle.attach(verifyResource, ["verify"], 3, true, [])
 emit beforeDelete
 emit afterDelete
 emit verify

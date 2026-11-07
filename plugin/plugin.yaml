@@ -10,14 +10,7 @@ spec:
       - mcl-argocd
       - generate
   parameters:
-    dynamic:
-      command:
-        - mcl-argocd
-        - parameters
     static:
-      - name: entrypoint
-        title: MCL entrypoint
-        string: main.mcl
       - name: parameter-files
         title: JSON parameter files
         collectionType: array

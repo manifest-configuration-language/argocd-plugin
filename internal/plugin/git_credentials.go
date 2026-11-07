@@ -22,20 +22,24 @@ func configureGitCredentialProvider(options *mcl.EvaluationOptions) {
 }
 
 func gitCredentialProvider() mcl.GitCredentialProvider {
+	return gitCredentialProviderWithAsk(askGitCredential)
+}
+
+func gitCredentialProviderWithAsk(ask func(context.Context, string) (string, error)) mcl.GitCredentialProvider {
 	if os.Getenv("GIT_ASKPASS") != "argocd" || os.Getenv("ARGOCD_BINARY_NAME") != "argocd-git-ask-pass" || os.Getenv("ARGOCD_GIT_ASKPASS_NONCE") == "" {
 		return nil
 	}
 
 	return func(ctx context.Context, source string) (mcl.GitCredentials, error) {
-		origin := os.Getenv("ARGOCD_APP_SOURCE_REPO")
+		origin := os.Getenv("ARGOCD_APP_SOURCE_REPO_URL")
 		if !sameGitRepository(origin, source) {
 			return mcl.GitCredentials{}, nil
 		}
-		username, err := askGitCredential(ctx, "Username for '"+source+"':")
+		username, err := ask(ctx, "Username for '"+source+"':")
 		if err != nil {
 			return mcl.GitCredentials{}, err
 		}
-		password, err := askGitCredential(ctx, "Password for '"+source+"':")
+		password, err := ask(ctx, "Password for '"+source+"':")
 		if err != nil {
 			return mcl.GitCredentials{}, err
 		}

@@ -19,7 +19,7 @@ let hook = lifecycle.attach(
   migration,
   ["before.create", "before.update"],
   -1,
-  false,
+  true,
   ["before-next-run", "on-success"],
 )
 

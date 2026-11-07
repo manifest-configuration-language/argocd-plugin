@@ -3,7 +3,6 @@ package plugin
 import (
 	"bytes"
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -20,13 +19,16 @@ import (
 )
 
 type renderedResource struct {
-	object   map[string]any
-	identity string
-	hooks    []string
-	cleanup  []string
-	wave     int
-	waveSet  bool
-	regular  bool
+	object    map[string]any
+	hooks     []string
+	cleanup   []string
+	wave      int
+	waveSet   bool
+	regular   bool
+	bootstrap bool
+	preSync   bool
+	scope     resourceScope
+	display   string
 }
 
 type operationSpec struct {
@@ -47,20 +49,22 @@ func Generate(ctx context.Context, encodedParameters string, output io.Writer) e
 }
 
 func generateFrom(ctx context.Context, root, encodedParameters string, output io.Writer) error {
-	parameters, entrypoint, options, err := readParameters(encodedParameters, root)
+	parameters, options, err := readParameters(encodedParameters, root)
 	if err != nil {
 		return err
 	}
-	entry, err := projectFile(root, entrypoint)
+	entry, err := projectFile(root, "main.mcl")
 	if err != nil {
 		return err
 	}
-	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion}
+	evaluationOptions := newEvaluationOptions(options)
 	configureGitCredentialProvider(&evaluationOptions)
 	if err := mcl.FetchFileWithParametersAndOptionsContext(ctx, entry, parameters, evaluationOptions); err != nil {
 		return fmt.Errorf("fetch locked MCL dependencies: %w", err)
 	}
 	resources := make(map[string]*renderedResource)
+	resourceScopes := make(map[string]resourceScope)
+	unknownScopeNamespaces := make(map[string]string)
 	operations := operationsFor(options)
 	for _, operation := range operations {
 		bundle, err := mcl.EvaluateFileForOperationWithParametersAndOptionsContext(ctx, entry, operation.name, parameters, evaluationOptions)
@@ -83,22 +87,44 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 				if err != nil {
 					return fmt.Errorf("decode MCL resource in phase %q: %w", phase, err)
 				}
-				identity, err := resourceIdentity(object)
+				resourceID, err := resourceIdentity(bundle, object, os.Getenv("ARGOCD_APP_DEST_NAMESPACE"))
 				if err != nil {
 					return err
 				}
+				identity := resourceID.key
+				if previousScope, exists := resourceScopes[resourceID.groupKindName]; exists && previousScope != resourceID.scope {
+					return fmt.Errorf("MCL operations resolve inconsistent resource scope for %s", resourceID.groupKindName)
+				}
+				resourceScopes[resourceID.groupKindName] = resourceID.scope
+				if resourceID.scope == resourceScopeUnknown {
+					unknownIdentity := resourceID.groupKindName + "\x00" + resourceID.name
+					if previousNamespace, exists := unknownScopeNamespaces[unknownIdentity]; exists && previousNamespace != resourceID.namespace && (previousNamespace == "" || resourceID.namespace == "") {
+						return fmt.Errorf("cannot determine whether MCL resource %s has namespace scope; its namespace is omitted in one operation and explicit in another", resourceID.groupKindName)
+					}
+					unknownScopeNamespaces[unknownIdentity] = resourceID.namespace
+				}
 				item := resources[identity]
 				if item == nil {
-					item = &renderedResource{object: object, identity: identity}
+					item = &renderedResource{object: object, scope: resourceID.scope, display: resourceID.display}
 					resources[identity] = item
+				} else if item.scope != resourceID.scope {
+					return fmt.Errorf("MCL operations resolve inconsistent resource scope for %s", resourceID.display)
 				} else if !equalYAML(item.object, object) {
-					return fmt.Errorf("MCL operations render conflicting contents for %s", identity)
+					return fmt.Errorf("MCL operations render conflicting contents for %s", resourceID.display)
 				}
 				if err := assignLifecycle(item, phase, artifact.Lifecycle); err != nil {
-					return fmt.Errorf("resource %s: %w", identity, err)
+					return fmt.Errorf("resource %s: %w", resourceID.display, err)
 				}
 			}
 		}
+	}
+	var hasBootstrap, hasPreSync bool
+	for _, item := range resources {
+		hasBootstrap = hasBootstrap || item.bootstrap
+		hasPreSync = hasPreSync || item.preSync
+	}
+	if hasBootstrap && hasPreSync {
+		return errors.New("MCL bootstrap resources cannot run before PreSync hooks in one Argo CD Application because phases precede waves; put bootstrap resources in a separate Application")
 	}
 	if len(resources) == 0 && !options.allowEmpty {
 		return errors.New("MCL produced no Kubernetes resources")
@@ -112,11 +138,11 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 	for _, key := range keys {
 		item := resources[key]
 		if err := applyLifecycle(item); err != nil {
-			return fmt.Errorf("resource %s: %w", key, err)
+			return fmt.Errorf("resource %s: %w", item.display, err)
 		}
 		data, err := yaml.Marshal(item.object)
 		if err != nil {
-			return fmt.Errorf("encode resource %s: %w", key, err)
+			return fmt.Errorf("encode resource %s: %w", item.display, err)
 		}
 		if rendered.Len() > 0 {
 			rendered.WriteString("---\n")
@@ -140,31 +166,31 @@ func operationsFor(options pluginOptions) []operationSpec {
 	return operations
 }
 
-// AnnounceInputFiles writes dynamic Argo CD parameters containing repository-relative MCL inputs.
-func AnnounceInputFiles(ctx context.Context, encodedParameters, sourcePath string, output io.Writer) error {
+// ListInputFiles writes semicolon-separated Application-source-relative paths read by MCL evaluation.
+func ListInputFiles(ctx context.Context, encodedParameters, sourcePath string, output io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get source directory: %w", err)
 	}
 
-	return announceInputFilesFrom(ctx, root, encodedParameters, sourcePath, output)
+	return listInputFilesFrom(ctx, root, encodedParameters, sourcePath, output)
 }
 
-func announceInputFilesFrom(ctx context.Context, root, encodedParameters, sourcePath string, output io.Writer) error {
+func listInputFilesFrom(ctx context.Context, root, encodedParameters, sourcePath string, output io.Writer) error {
 	canonicalRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return fmt.Errorf("resolve source directory: %w", err)
 	}
 	root = canonicalRoot
-	parameters, entrypoint, options, err := readParameters(encodedParameters, root)
+	parameters, options, err := readParameters(encodedParameters, root)
 	if err != nil {
 		return err
 	}
-	entry, err := projectFile(root, entrypoint)
+	entry, err := projectFile(root, "main.mcl")
 	if err != nil {
 		return err
 	}
-	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion}
+	evaluationOptions := newEvaluationOptions(options)
 	configureGitCredentialProvider(&evaluationOptions)
 	if err := mcl.FetchFileWithParametersAndOptionsContext(ctx, entry, parameters, evaluationOptions); err != nil {
 		return fmt.Errorf("fetch locked MCL dependencies: %w", err)
@@ -179,7 +205,7 @@ func announceInputFilesFrom(ctx context.Context, root, encodedParameters, source
 		return errors.New("plugin source path must be repository-relative")
 	}
 	inputs := make(map[string]struct{})
-	inputs[filepath.ToSlash(entrypoint)] = struct{}{}
+	inputs["main.mcl"] = struct{}{}
 	for _, parameterFile := range options.parameterFiles {
 		inputs[filepath.ToSlash(parameterFile)] = struct{}{}
 	}
@@ -202,11 +228,7 @@ func announceInputFilesFrom(ctx context.Context, root, encodedParameters, source
 		paths = append(paths, input)
 	}
 	slices.Sort(paths)
-	encoded, err := json.Marshal([]map[string]any{{"name": "input-files", "title": "MCL input files", "array": paths, "collectionType": "array"}})
-	if err != nil {
-		return fmt.Errorf("encode dynamic parameter announcement: %w", err)
-	}
-	_, err = output.Write(encoded)
+	_, err = io.WriteString(output, strings.Join(paths, ";")+"\n")
 
 	return err
 }
@@ -238,26 +260,34 @@ func decodeResource(data []byte) (map[string]any, error) {
 	return object, nil
 }
 
-func resourceIdentity(object map[string]any) (string, error) {
-	apiVersion, _ := object["apiVersion"].(string)
-	kind, _ := object["kind"].(string)
-	metadata, _ := object["metadata"].(map[string]any)
-	name, _ := metadata["name"].(string)
-	namespace, _ := metadata["namespace"].(string)
-	if apiVersion == "" || kind == "" || name == "" {
-		return "", errors.New("MCL output contains a resource without apiVersion, kind, or metadata.name")
-	}
+type resourceScope string
 
-	return strings.Join([]string{apiVersion, kind, namespace, name}, "/"), nil
+const (
+	resourceScopeUnknown    resourceScope = "Unknown"
+	resourceScopeNamespaced resourceScope = "Namespaced"
+	resourceScopeCluster    resourceScope = "Cluster"
+)
+
+type resourceIdentityValue struct {
+	key           string
+	groupKindName string
+	display       string
+	name          string
+	namespace     string
+	scope         resourceScope
 }
 
 func assignLifecycle(item *renderedResource, phase string, lifecycle mcl.Lifecycle) error {
 	for _, event := range lifecycle.Events {
+		if event == phase && event != "main" && !lifecycle.Wait {
+			return fmt.Errorf("MCL lifecycle event %q sets wait=false, but Argo CD always waits for lifecycle Hooks and Sync Waves", event)
+		}
 		if phase == "main" && event == "main" {
 			item.regular = true
 		}
 		if phase == "bootstrap" && event == "bootstrap" {
 			item.regular = true
+			item.bootstrap = true
 			wave := -1000 + lifecycle.Priority
 			if item.waveSet && wave != item.wave {
 				return fmt.Errorf("MCL lifecycle events assign conflicting sync waves %d and %d", item.wave, wave)
@@ -271,6 +301,7 @@ func assignLifecycle(item *renderedResource, phase string, lifecycle mcl.Lifecyc
 		switch {
 		case (phase == "before.create" || phase == "before.update") && (event == "before.create" || event == "before.update"):
 			hook = "PreSync"
+			item.preSync = true
 		case (phase == "after.create" || phase == "after.update") && (event == "after.create" || event == "after.update"):
 			hook = "PostSync"
 		case phase == "before.delete" && event == "before.delete":
