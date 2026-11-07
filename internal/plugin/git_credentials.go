@@ -15,7 +15,7 @@ import (
 	"github.com/manifest-configuration-language/mcl/pkg/mcl"
 )
 
-const argocdBinaryPath = "/usr/local/bin/argocd"
+const argocdBinaryPath = "/var/run/argocd/argocd"
 
 func configureGitCredentialProvider(options *mcl.EvaluationOptions) {
 	options.GitCredentialProvider = gitCredentialProvider()
