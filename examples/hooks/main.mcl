@@ -1,0 +1,26 @@
+let migration =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    name: "database-migration"
+  spec:
+    template:
+      spec:
+        restartPolicy: "Never"
+        containers:
+          - name: "migration"
+            image: "busybox:1.37.0"
+            command:
+              - "sh"
+              - "-c"
+              - "echo migrate"
+
+let hook = lifecycle.attach(
+  migration,
+  ["before.create", "before.update"],
+  -1,
+  false,
+  ["before-next-run", "on-success"],
+)
+
+emit hook

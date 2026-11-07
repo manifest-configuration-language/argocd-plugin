@@ -1,0 +1,7 @@
+# セキュリティ
+
+CMPは信頼されたRepositoryコードとして評価されます。SidecarはNon-root、Read-only Root Filesystem、Capabilitiesなしで実行します。Git認証情報の共有とGit内の実行モード維持を無効にします。
+
+Plugin ParameterのパスをShellへ渡しません。JSONファイルとEntrypointは相対パスに限定し、Symlink解決後もソースディレクトリ内にあることを確認します。パラメータ、Secrets、環境変数の内容はログへ出力しません。
+
+MCL評価には10分のContext deadlineを設定し、ロック済み外部依存だけを取得します。Manifest生成のために依存Lockを更新しません。評価失敗、Lifecycle競合、空出力の既定状態ではManifestを返さないため、失敗した生成結果によるPruneを防ぎます。意図的な空出力は`allow-empty: 'true'`で明示します。

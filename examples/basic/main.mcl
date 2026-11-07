@@ -1,0 +1,8 @@
+emit
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "example"
+    namespace: "default"
+  data:
+    greeting: "hello from MCL"

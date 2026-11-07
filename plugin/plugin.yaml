@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ConfigManagementPlugin
+metadata:
+  name: mcl
+spec:
+  discover:
+    fileName: main.mcl
+  generate:
+    command:
+      - mcl-argocd
+      - generate
+  parameters:
+    static:
+      - name: entrypoint
+        title: MCL entrypoint
+        string: main.mcl
+      - name: parameter-files
+        title: JSON parameter files
+        collectionType: array
+      - name: parameters
+        title: JSON parameters
+        string: '{}'
+      - name: allow-empty
+        title: Allow empty output
+        string: 'false'
+      - name: include-verify
+        title: Include verify Hooks
+        string: 'false'
+  preserveFileMode: false
+  provideGitCreds: false

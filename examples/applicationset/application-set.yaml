@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: mcl-apps
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/example/platform.git
+        revision: main
+        directories:
+          - path: apps/*
+  template:
+    metadata:
+      name: '{{path.basename}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/example/platform.git
+        targetRevision: main
+        path: '{{path}}'
+        plugin:
+          name: mcl
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{path.basename}}'
