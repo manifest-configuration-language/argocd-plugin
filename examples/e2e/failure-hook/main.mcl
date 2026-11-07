@@ -1,0 +1,16 @@
+let failingJob =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    name: "mcl-failure-hook"
+  spec:
+    backoffLimit: 0
+    template:
+      spec:
+        restartPolicy: "Never"
+        containers:
+          - name: "fail"
+            image: "busybox:1.37.0"
+            command: ["sh", "-c", "exit 1"]
+let hook = lifecycle.attach(failingJob, ["before.create"], 0, true, ["on-failure"])
+emit hook

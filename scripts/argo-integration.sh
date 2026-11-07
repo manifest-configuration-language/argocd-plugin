@@ -122,3 +122,35 @@ if kubectl get -n default configmap mcl-multi-source >/dev/null 2>&1 ||
   printf 'Application deletion left multi-source resources behind\n' >&2
   exit 1
 fi
+
+cat <<EOF | kubectl apply -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: $application
+  namespace: $namespace
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/$E2E_REPOSITORY.git
+    targetRevision: $E2E_REVISION
+    path: examples/e2e/failure-hook
+    plugin:
+      name: mcl
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+operation:
+  sync:
+    revision: $E2E_REVISION
+EOF
+
+kubectl wait -n "$namespace" --for='jsonpath={.status.operationState.phase}=Failed' \
+  "application/$application" --timeout=5m
+if kubectl get -n default job mcl-failure-hook >/dev/null 2>&1; then
+  printf 'the failed MCL Hook was not cleaned up\n' >&2
+  exit 1
+fi
+kubectl delete -n "$namespace" "application/$application" --wait=true --timeout=3m
