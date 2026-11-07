@@ -23,7 +23,7 @@ func main() {
 		err = plugin.AnnounceInputFiles(ctx, os.Getenv("ARGOCD_APP_PARAMETERS"), os.Getenv("ARGOCD_APP_SOURCE_PATH"), os.Stdout)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, plugin.FormatError(err))
 		os.Exit(1)
 	}
 }

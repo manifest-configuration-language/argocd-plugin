@@ -2,14 +2,17 @@ package plugin
 
 import (
 	"bytes"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestGenerateRendersLifecycleAndOrdinaryResources(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	writeProjectFile(t, root, "main.mcl", `let resource =
   apiVersion: "v1"
@@ -49,6 +52,8 @@ emit regular
 }
 
 func TestGenerateResolvesMonorepoImportsFromProjectRoot(t *testing.T) {
+	t.Parallel()
+
 	project := t.TempDir()
 	app := filepath.Join(project, "apps", "worker")
 	writeProjectFile(t, project, "mcl.toml", "")
@@ -73,6 +78,8 @@ emit resource
 }
 
 func TestGenerateMapsHelmHooksToArgoCDHooks(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	writeProjectFile(t, root, "main.mcl", `let options =
   kubeVersion: "1.36.0"
@@ -129,6 +136,8 @@ metadata:
 }
 
 func TestAnnounceInputFilesIncludesMCLAndParameterInputs(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	writeProjectFile(t, root, "mcl.toml", "")
 	writeProjectFile(t, root, "apps/worker/main.mcl", `import "../../cluster.mcl" as cluster
@@ -155,6 +164,8 @@ emit resource
 }
 
 func TestGenerateRejectsCreateUpdateManifestDrift(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	writeProjectFile(t, root, "main.mcl", `let options =
   kubeVersion: "1.36.0"
@@ -179,6 +190,8 @@ data:
 }
 
 func TestGenerateRequiresExplicitEmptyOutputOptIn(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	writeProjectFile(t, root, "main.mcl", "let unused = 1\n")
 	if err := generateFrom(t.Context(), root, "[]", &bytes.Buffer{}); err == nil {
@@ -194,6 +207,8 @@ func TestGenerateRequiresExplicitEmptyOutputOptIn(t *testing.T) {
 }
 
 func TestGenerateMapsDeleteHooksAndOptionalVerification(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	writeProjectFile(t, root, "main.mcl", `let beforeDeleteResource =
   apiVersion: "v1"
@@ -234,6 +249,8 @@ emit verify
 }
 
 func TestDecodeResourcePreservesLargeIntegers(t *testing.T) {
+	t.Parallel()
+
 	const value = "9223372036854775807"
 	resource, err := decodeResource([]byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"integer"},"data":{"value":` + value + `}}`))
 	if err != nil {

@@ -7,6 +7,8 @@ import (
 )
 
 func TestReadParametersMergesJSONInputsAndRejectsDuplicateKeys(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "main.mcl"), []byte(""), 0o600); err != nil {
 		t.Fatal(err)
@@ -28,6 +30,8 @@ func TestReadParametersMergesJSONInputsAndRejectsDuplicateKeys(t *testing.T) {
 }
 
 func TestProjectFileRejectsTraversalAndSymlinkEscape(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	if _, err := projectFile(root, "../outside"); err == nil {
 		t.Fatal("projectFile() accepted path traversal")
@@ -45,6 +49,8 @@ func TestProjectFileRejectsTraversalAndSymlinkEscape(t *testing.T) {
 }
 
 func TestReadParametersRejectsMalformedArgoParameterShapes(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "main.mcl"), []byte(""), 0o600); err != nil {
 		t.Fatal(err)
@@ -56,6 +62,8 @@ func TestReadParametersRejectsMalformedArgoParameterShapes(t *testing.T) {
 		`[{"name":"entrypoint","string":"main.mcl","extra":true}]`,
 	} {
 		t.Run(input, func(t *testing.T) {
+			t.Parallel()
+
 			if _, _, _, err := readParameters(input, root); err == nil {
 				t.Fatalf("readParameters() accepted malformed input %s", input)
 			}
@@ -64,6 +72,8 @@ func TestReadParametersRejectsMalformedArgoParameterShapes(t *testing.T) {
 }
 
 func TestReadParametersAcceptsNoParameters(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "main.mcl"), []byte(""), 0o600); err != nil {
 		t.Fatal(err)

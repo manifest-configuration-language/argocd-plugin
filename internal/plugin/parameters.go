@@ -3,6 +3,7 @@ package plugin
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -39,13 +40,13 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 		return nil, "", options, fmt.Errorf("decode Argo CD parameters: %w", err)
 	}
 	if supplied == nil {
-		return nil, "", options, fmt.Errorf("Argo CD parameters must be a JSON array")
+		return nil, "", options, errors.New("plugin parameters must be a JSON array")
 	}
 	var parameterFiles []string
 	seen := make(map[string]bool, len(supplied))
 	for _, parameter := range supplied {
 		if seen[parameter.Name] {
-			return nil, "", options, fmt.Errorf("Argo CD parameter %q is supplied more than once", parameter.Name)
+			return nil, "", options, fmt.Errorf("parameter %q is supplied more than once", parameter.Name)
 		}
 		seen[parameter.Name] = true
 		switch parameter.Name {
@@ -54,7 +55,7 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 				return nil, "", options, err
 			}
 			if *parameter.String == "" {
-				return nil, "", options, fmt.Errorf("entrypoint must not be empty")
+				return nil, "", options, errors.New("entrypoint must not be empty")
 			}
 			entry = *parameter.String
 		case "parameter-files":
@@ -74,7 +75,7 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 				return nil, "", options, fmt.Errorf("decode parameters JSON: %w", err)
 			}
 			if object == nil {
-				return nil, "", options, fmt.Errorf("parameters must be a JSON object")
+				return nil, "", options, errors.New("parameters must be a JSON object")
 			}
 			if err := mergeParameters(values, object); err != nil {
 				return nil, "", options, err
@@ -97,7 +98,7 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 				return nil, "", options, err
 			}
 			if *parameter.String == "" {
-				return nil, "", options, fmt.Errorf("kubernetes-version must not be empty")
+				return nil, "", options, errors.New("kubernetes-version must not be empty")
 			}
 			options.kubernetesVersion = *parameter.String
 		default:
@@ -139,6 +140,7 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 	if _, err := projectFile(root, entry); err != nil {
 		return nil, "", options, err
 	}
+
 	return values, entry, options, nil
 }
 
@@ -155,8 +157,9 @@ func requireParameterShape(parameter announcedParameter, shape string) error {
 	}
 	valid := (shape == "string" && parameter.String != nil) || (shape == "array" && parameter.Array != nil) || (shape == "map" && parameter.Map != nil)
 	if present != 1 || !valid {
-		return fmt.Errorf("Argo CD parameter %q must use the %s field", parameter.Name, shape)
+		return fmt.Errorf("parameter %q must use the %s field", parameter.Name, shape)
 	}
+
 	return nil
 }
 
@@ -167,12 +170,13 @@ func mergeParameters(dst, src map[string]jsontext.Value) error {
 		}
 		dst[name] = value
 	}
+
 	return nil
 }
 
 func projectFile(root, name string) (string, error) {
 	if name == "" || filepath.IsAbs(name) {
-		return "", fmt.Errorf("project path must be relative")
+		return "", errors.New("project path must be relative")
 	}
 	clean := filepath.Clean(name)
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
@@ -190,5 +194,6 @@ func projectFile(root, name string) (string, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("project path %q escapes the source directory", name)
 	}
+
 	return path, nil
 }

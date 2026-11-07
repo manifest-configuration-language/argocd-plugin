@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/manifest-configuration-language/mcl/pkg/mcl"
@@ -32,12 +34,15 @@ type operationSpec struct {
 	phases []string
 }
 
+const verifyPhase = "verify"
+
 // Generate evaluates the selected MCL project and writes a complete Argo CD manifest stream.
 func Generate(ctx context.Context, encodedParameters string, output io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get source directory: %w", err)
 	}
+
 	return generateFrom(ctx, root, encodedParameters, output)
 }
 
@@ -50,7 +55,7 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 	if err != nil {
 		return err
 	}
-	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion}
+	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion, GitCredentialProvider: gitCredentialProvider()}
 	if err := mcl.FetchFileWithParametersAndOptionsContext(ctx, entry, parameters, evaluationOptions); err != nil {
 		return fmt.Errorf("fetch locked MCL dependencies: %w", err)
 	}
@@ -95,7 +100,7 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 		}
 	}
 	if len(resources) == 0 && !options.allowEmpty {
-		return fmt.Errorf("MCL produced no Kubernetes resources")
+		return errors.New("MCL produced no Kubernetes resources")
 	}
 	keys := make([]string, 0, len(resources))
 	for key := range resources {
@@ -118,17 +123,19 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 		rendered.Write(data)
 	}
 	if rendered.Len() == 0 && !options.allowEmpty {
-		return fmt.Errorf("MCL produced an empty manifest stream")
+		return errors.New("MCL produced an empty manifest stream")
 	}
 	_, err = output.Write(rendered.Bytes())
+
 	return err
 }
 
 func operationsFor(options pluginOptions) []operationSpec {
 	operations := []operationSpec{{"create", []string{"bootstrap", "before.create", "main", "after.create"}}, {"update", []string{"before.update", "main", "after.update"}}, {"delete", []string{"before.delete", "after.delete"}}, {"rollback", []string{"before.rollback", "after.rollback"}}}
 	if options.includeVerify {
-		operations = append(operations, operationSpec{"verify", []string{"verify"}})
+		operations = append(operations, operationSpec{verifyPhase, []string{verifyPhase}})
 	}
+
 	return operations
 }
 
@@ -138,6 +145,7 @@ func AnnounceInputFiles(ctx context.Context, encodedParameters, sourcePath strin
 	if err != nil {
 		return fmt.Errorf("get source directory: %w", err)
 	}
+
 	return announceInputFilesFrom(ctx, root, encodedParameters, sourcePath, output)
 }
 
@@ -155,7 +163,7 @@ func announceInputFilesFrom(ctx context.Context, root, encodedParameters, source
 	if err != nil {
 		return err
 	}
-	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion}
+	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion, GitCredentialProvider: gitCredentialProvider()}
 	if err := mcl.FetchFileWithParametersAndOptionsContext(ctx, entry, parameters, evaluationOptions); err != nil {
 		return fmt.Errorf("fetch locked MCL dependencies: %w", err)
 	}
@@ -166,7 +174,7 @@ func announceInputFilesFrom(ctx context.Context, root, encodedParameters, source
 	}
 	repoSourcePath := path.Clean(filepath.ToSlash(sourcePath))
 	if path.IsAbs(repoSourcePath) || repoSourcePath == ".." || strings.HasPrefix(repoSourcePath, "../") {
-		return fmt.Errorf("Argo CD source path must be repository-relative")
+		return errors.New("plugin source path must be repository-relative")
 	}
 	inputs := make(map[string]struct{})
 	for _, parameterFile := range options.parameterFiles {
@@ -196,6 +204,7 @@ func announceInputFilesFrom(ctx context.Context, root, encodedParameters, source
 		return fmt.Errorf("encode dynamic parameter announcement: %w", err)
 	}
 	_, err = output.Write(encoded)
+
 	return err
 }
 
@@ -219,9 +228,10 @@ func decodeResource(data []byte) (map[string]any, error) {
 		return nil, err
 	}
 	var extra map[string]any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, fmt.Errorf("MCL artifact contains multiple JSON values")
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, errors.New("MCL artifact contains multiple JSON values")
 	}
+
 	return object, nil
 }
 
@@ -232,8 +242,9 @@ func resourceIdentity(object map[string]any) (string, error) {
 	name, _ := metadata["name"].(string)
 	namespace, _ := metadata["namespace"].(string)
 	if apiVersion == "" || kind == "" || name == "" {
-		return "", fmt.Errorf("MCL output contains a resource without apiVersion, kind, or metadata.name")
+		return "", errors.New("MCL output contains a resource without apiVersion, kind, or metadata.name")
 	}
+
 	return strings.Join([]string{apiVersion, kind, namespace, name}, "/"), nil
 }
 
@@ -263,7 +274,7 @@ func assignLifecycle(item *renderedResource, phase string, lifecycle mcl.Lifecyc
 			hook = "PreDelete"
 		case phase == "after.delete" && event == "after.delete":
 			hook = "PostDelete"
-		case phase == "verify" && event == "verify":
+		case phase == verifyPhase && event == verifyPhase:
 			hook = "PostSync"
 		}
 		if hook != "" && !slices.Contains(item.hooks, hook) {
@@ -275,9 +286,10 @@ func assignLifecycle(item *renderedResource, phase string, lifecycle mcl.Lifecyc
 			item.waveSet = true
 		}
 	}
-	if strings.HasPrefix(phase, "before.") || strings.HasPrefix(phase, "after.") || phase == "verify" {
+	if strings.HasPrefix(phase, "before.") || strings.HasPrefix(phase, "after.") || phase == verifyPhase {
 		item.cleanup = append(item.cleanup, lifecycle.Cleanup...)
 	}
+
 	return nil
 }
 
@@ -299,15 +311,15 @@ func applyLifecycle(item *renderedResource) error {
 		}
 	}
 	if item.regular && len(item.hooks) > 0 {
-		return fmt.Errorf("resource is both a regular resource and an Argo CD hook")
+		return errors.New("resource is both a regular resource and an Argo CD hook")
 	}
 	if item.waveSet {
-		if err := setAnnotation(annotations, "argocd.argoproj.io/sync-wave", fmt.Sprint(item.wave)); err != nil {
+		if err := setAnnotation(annotations, "argocd.argoproj.io/sync-wave", strconv.Itoa(item.wave)); err != nil {
 			return err
 		}
 	}
 	if len(item.cleanup) > 0 && len(item.hooks) == 0 {
-		return fmt.Errorf("MCL cleanup policy is set on a resource without an Argo CD Hook")
+		return errors.New("MCL cleanup policy is set on a resource without an Argo CD Hook")
 	}
 	var policies []string
 	for _, cleanup := range item.cleanup {
@@ -328,6 +340,7 @@ func applyLifecycle(item *renderedResource) error {
 	if len(annotations) == 0 {
 		delete(metadata, "annotations")
 	}
+
 	return nil
 }
 
@@ -339,6 +352,7 @@ func setAnnotation(annotations map[string]any, key, value string) error {
 		}
 	}
 	annotations[key] = value
+
 	return nil
 }
 
@@ -352,13 +366,16 @@ func equivalentAnnotationValue(key, existing, expected string) bool {
 			items[index] = strings.TrimSpace(items[index])
 		}
 		slices.Sort(items)
+
 		return slices.Compact(items)
 	}
+
 	return slices.Equal(values(existing), values(expected))
 }
 
 func equalYAML(left, right map[string]any) bool {
 	a, errA := yaml.Marshal(left)
 	b, errB := yaml.Marshal(right)
+
 	return errA == nil && errB == nil && bytes.Equal(a, b)
 }

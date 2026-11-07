@@ -11,6 +11,7 @@ FROM quay.io/argoproj/argocd:v3.6.1 AS argocd
 
 FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=argocd /usr/local/bin/argocd-cmp-server /var/run/argocd/argocd-cmp-server
+COPY --from=argocd /usr/local/bin/argocd /usr/local/bin/argocd
 COPY --from=build /out/mcl-argocd /usr/local/bin/mcl-argocd
 COPY --from=build /src/plugin/plugin.yaml /home/argocd/cmp-server/config/plugin.yaml
 USER 999:999

@@ -62,6 +62,10 @@ Argo CDはSelective SyncでSync Hookを実行しません。Prune、Diff、Healt
 
 ## セキュリティと制約
 
-プラグインはGit認証情報を受け取らず、ファイル実行権限を保持しません。MCLのLockファイルに固定された依存だけを取得し、レンダリング中にLockを更新しません。評価には10分の上限を設けています。
+既定ではGit認証情報を共有せず、ファイル実行権限を保持しません。MCLのLockファイルに固定された依存だけを取得し、レンダリング中にLockを更新しません。評価には10分の上限を設けています。Git認証が必要な場合の有効化方法とアクセス範囲は[セキュリティ設定](docs/security.md#git認証)を参照してください。
 
 イメージはMCLの依存コミットとArgo CD v3.6.1を固定してビルドします。リリースworkflowはlinux/amd64とlinux/arm64のマルチアーキテクチャイメージをGHCRへ公開し、SBOM、BuildKit Provenance、GitHub Artifact Attestationを生成します。
+
+## OpenTelemetry
+
+Argo CD v3.6.1のCMP ServerからOTLP Traceを送信する方法は[OpenTelemetry設定](docs/observability.md)を参照してください。

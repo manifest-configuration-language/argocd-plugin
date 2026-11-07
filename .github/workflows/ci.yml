@@ -20,12 +20,16 @@ jobs:
       - uses: actions/checkout@v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5.6.0
+      - uses: jdx/mise-action@v5.2.6
         with:
-          go-version-file: go.mod
+          install: true
+          install_args: go golangci-lint
           cache: true
       - run: go test ./...
+        timeout-minutes: 20
       - run: go vet ./...
+      - run: golangci-lint run ./...
+        timeout-minutes: 20
       - run: git diff --check
   image:
     runs-on: ubuntu-latest
