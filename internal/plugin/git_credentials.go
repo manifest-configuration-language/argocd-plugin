@@ -1,3 +1,5 @@
+//go:build !mcl_without_git_credentials
+
 package plugin
 
 import (
@@ -14,6 +16,10 @@ import (
 )
 
 const argocdBinaryPath = "/usr/local/bin/argocd"
+
+func configureGitCredentialProvider(options *mcl.EvaluationOptions) {
+	options.GitCredentialProvider = gitCredentialProvider()
+}
 
 func gitCredentialProvider() mcl.GitCredentialProvider {
 	if os.Getenv("GIT_ASKPASS") != "argocd" || os.Getenv("ARGOCD_BINARY_NAME") != "argocd-git-ask-pass" || os.Getenv("ARGOCD_GIT_ASKPASS_NONCE") == "" {

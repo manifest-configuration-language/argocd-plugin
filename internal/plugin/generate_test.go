@@ -156,7 +156,11 @@ emit resource
 	if err := announceInputFilesFrom(t.Context(), filepath.Join(root, "apps/worker"), parameters, "apps/worker", &output); err != nil {
 		t.Fatalf("announceInputFilesFrom() error = %v", err)
 	}
-	for _, input := range []string{"../../cluster.mcl", "../../mcl.toml", "main.mcl", "params.json"} {
+	inputs := []string{"main.mcl", "params.json"}
+	if readFilesAvailable {
+		inputs = append(inputs, "../../cluster.mcl", "../../mcl.toml")
+	}
+	for _, input := range inputs {
 		if !strings.Contains(output.String(), input) {
 			t.Errorf("dynamic announcement %s does not contain input %q", output.String(), input)
 		}

@@ -55,7 +55,8 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 	if err != nil {
 		return err
 	}
-	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion, GitCredentialProvider: gitCredentialProvider()}
+	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion}
+	configureGitCredentialProvider(&evaluationOptions)
 	if err := mcl.FetchFileWithParametersAndOptionsContext(ctx, entry, parameters, evaluationOptions); err != nil {
 		return fmt.Errorf("fetch locked MCL dependencies: %w", err)
 	}
@@ -163,7 +164,8 @@ func announceInputFilesFrom(ctx context.Context, root, encodedParameters, source
 	if err != nil {
 		return err
 	}
-	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion, GitCredentialProvider: gitCredentialProvider()}
+	evaluationOptions := mcl.EvaluationOptions{KubernetesVersion: options.kubernetesVersion}
+	configureGitCredentialProvider(&evaluationOptions)
 	if err := mcl.FetchFileWithParametersAndOptionsContext(ctx, entry, parameters, evaluationOptions); err != nil {
 		return fmt.Errorf("fetch locked MCL dependencies: %w", err)
 	}
@@ -177,11 +179,12 @@ func announceInputFilesFrom(ctx context.Context, root, encodedParameters, source
 		return errors.New("plugin source path must be repository-relative")
 	}
 	inputs := make(map[string]struct{})
+	inputs[filepath.ToSlash(entrypoint)] = struct{}{}
 	for _, parameterFile := range options.parameterFiles {
 		inputs[filepath.ToSlash(parameterFile)] = struct{}{}
 	}
 	for _, operation := range operationsFor(options) {
-		_, readFiles, err := mcl.EvaluateFileForOperationWithParametersAndOptionsAndReadFilesContext(ctx, entry, operation.name, parameters, evaluationOptions)
+		_, readFiles, err := evaluateWithReadFiles(ctx, entry, operation.name, parameters, evaluationOptions)
 		if err != nil {
 			return fmt.Errorf("evaluate MCL %s operation: %w", operation.name, err)
 		}

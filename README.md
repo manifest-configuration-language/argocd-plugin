@@ -69,3 +69,5 @@ Argo CDはSelective SyncでSync Hookを実行しません。Prune、Diff、Healt
 ## OpenTelemetry
 
 Argo CD v3.6.1のCMP ServerからOTLP Traceを送信する方法は[OpenTelemetry設定](docs/observability.md)を参照してください。
+
+同じArgo CDで異なるMCL Toolchainを使うSidecar構成は[MCL SDKバージョン設定](docs/mcl-versions.md)を参照してください。
