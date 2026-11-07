@@ -6,21 +6,21 @@ metadata:
 spec:
   generators:
     - git:
-        repoURL: https://github.com/example/platform.git
+        repoURL: https://github.com/manifest-configuration-language/argocd-plugin.git
         revision: main
         directories:
-          - path: apps/*
+          - path: examples/applicationset/apps/*
   template:
     metadata:
       name: '{{path.basename}}'
     spec:
       project: default
       source:
-        repoURL: https://github.com/example/platform.git
+        repoURL: https://github.com/manifest-configuration-language/argocd-plugin.git
         targetRevision: main
         path: '{{path}}'
         plugin:
           name: mcl
       destination:
         server: https://kubernetes.default.svc
-        namespace: '{{path.basename}}'
+        namespace: default

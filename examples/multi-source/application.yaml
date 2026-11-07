@@ -6,14 +6,14 @@ metadata:
 spec:
   project: default
   sources:
-    - repoURL: https://github.com/example/platform.git
+    - repoURL: https://github.com/manifest-configuration-language/argocd-plugin.git
       targetRevision: main
-      path: apps/example
+      path: examples/multi-source
       plugin:
         name: mcl
-    - repoURL: https://github.com/example/platform.git
+    - repoURL: https://github.com/manifest-configuration-language/argocd-plugin.git
       targetRevision: main
-      ref: values
+      path: examples/helm/chart
   destination:
     server: https://kubernetes.default.svc
     namespace: example

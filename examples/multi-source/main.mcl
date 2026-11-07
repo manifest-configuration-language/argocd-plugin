@@ -1,0 +1,8 @@
+let configMap =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "mcl-multi-source"
+  data:
+    source: "MCL"
+emit configMap
