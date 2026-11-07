@@ -10,6 +10,33 @@ import (
 	"github.com/manifest-configuration-language/mcl/pkg/mcl"
 )
 
+func TestGenerateLoadsMCLCLIGeneratedLock(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	source, err := os.ReadFile(filepath.Join("testdata", "mcl-cli-lock", "main.mcl"))
+	if err != nil {
+		t.Fatalf("read CLI-generated MCL fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.mcl"), source, 0o600); err != nil { // #nosec G703 -- root is an isolated t.TempDir directory.
+		t.Fatalf("write CLI-generated MCL fixture: %v", err)
+	}
+	lock, err := os.ReadFile(filepath.Join("testdata", "mcl-cli-lock", "mcl.lock"))
+	if err != nil {
+		t.Fatalf("read CLI-generated lock fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "mcl.lock"), lock, 0o600); err != nil { // #nosec G703 -- root is an isolated t.TempDir directory.
+		t.Fatalf("write CLI-generated lock fixture: %v", err)
+	}
+	var output bytes.Buffer
+	if err := generateFrom(t.Context(), root, "[]", &output); err != nil {
+		t.Fatalf("generateFrom() rejected the MCL CLI-generated lock: %v", err)
+	}
+	if !strings.Contains(output.String(), "name: cli-lock-fixture") {
+		t.Fatalf("generateFrom() output = %s, want the CLI-locked ConfigMap", output.String())
+	}
+}
+
 func TestGenerateUsesMCLToolchainLockAndSharedCache(t *testing.T) {
 	root := t.TempDir()
 	lockPath := filepath.Join(root, "mcl.lock")

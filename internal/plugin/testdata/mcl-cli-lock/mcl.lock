@@ -1,0 +1,17 @@
+{
+  "version": 4,
+  "toolchain": {
+    "mcl": "v0.4.8-0.20261107200344-014a0f5edfe0",
+    "revision": "",
+    "modified": "",
+    "go": "go1.27.3",
+    "helm": "v4.3.1",
+    "kustomizeAPI": "v0.21.3",
+    "kustomizeKYAML": "v0.21.3"
+  },
+  "manifests": {},
+  "schemas": {},
+  "charts": {},
+  "ociCharts": {},
+  "gitSources": {}
+}

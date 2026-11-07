@@ -1,0 +1,6 @@
+let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "cli-lock-fixture"
+emit resource
