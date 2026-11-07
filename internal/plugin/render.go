@@ -158,6 +158,9 @@ func assignLifecycle(item *renderedResource, phase string, lifecycle mcl.Lifecyc
 		if phase == "bootstrap" && event == "bootstrap" {
 			item.regular = true
 			wave := -1000 + lifecycle.Priority
+			if item.waveSet && wave != item.wave {
+				return fmt.Errorf("MCL lifecycle events assign conflicting sync waves %d and %d", item.wave, wave)
+			}
 			if !item.waveSet || wave < item.wave {
 				item.wave = wave
 				item.waveSet = true
@@ -244,12 +247,27 @@ func applyLifecycle(item *renderedResource) error {
 func setAnnotation(annotations map[string]any, key, value string) error {
 	if raw, exists := annotations[key]; exists {
 		existing, ok := raw.(string)
-		if !ok || existing != value {
+		if !ok || !equivalentAnnotationValue(key, existing, value) {
 			return fmt.Errorf("annotation %s conflicts with MCL lifecycle value %q", key, value)
 		}
 	}
 	annotations[key] = value
 	return nil
+}
+
+func equivalentAnnotationValue(key, existing, expected string) bool {
+	if key != "argocd.argoproj.io/hook" && key != "argocd.argoproj.io/hook-delete-policy" {
+		return existing == expected
+	}
+	values := func(value string) []string {
+		items := strings.Split(value, ",")
+		for index := range items {
+			items[index] = strings.TrimSpace(items[index])
+		}
+		slices.Sort(items)
+		return slices.Compact(items)
+	}
+	return slices.Equal(values(existing), values(expected))
 }
 
 func equalYAML(left, right map[string]any) bool {
