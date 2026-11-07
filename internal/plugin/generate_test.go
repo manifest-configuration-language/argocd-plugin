@@ -61,6 +61,21 @@ data:
 	}
 }
 
+func TestGenerateRequiresExplicitEmptyOutputOptIn(t *testing.T) {
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", "let unused = 1\n")
+	if err := generateFrom(t.Context(), root, "[]", &bytes.Buffer{}); err == nil {
+		t.Fatal("generateFrom() accepted empty output without opt-in")
+	}
+	var output bytes.Buffer
+	if err := generateFrom(t.Context(), root, `[{"name":"allow-empty","string":"true"}]`, &output); err != nil {
+		t.Fatalf("generateFrom() rejected explicitly allowed empty output: %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("allowed empty output contains %q", output.String())
+	}
+}
+
 func writeProjectFile(t *testing.T, root, name, contents string) {
 	t.Helper()
 	path := filepath.Join(root, name)

@@ -4,22 +4,25 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 type announcedParameter struct {
-	Name   string            `json:"name"`
-	String string            `json:"string,omitempty"`
-	Array  []string          `json:"array,omitempty"`
-	Map    map[string]string `json:"map,omitempty"`
+	Name   string             `json:"name"`
+	String *string            `json:"string"`
+	Array  *[]string          `json:"array"`
+	Map    *map[string]string `json:"map"`
 }
 
 type pluginOptions struct {
 	allowEmpty    bool
 	includeVerify bool
 }
+
+const maxParameterFileSize = 64 << 20
 
 func readParameters(encoded, root string) (map[string]jsontext.Value, string, pluginOptions, error) {
 	values := make(map[string]jsontext.Value)
@@ -29,8 +32,11 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 		return values, entry, options, nil
 	}
 	var supplied []announcedParameter
-	if err := json.Unmarshal([]byte(encoded), &supplied); err != nil {
+	if err := json.Unmarshal([]byte(encoded), &supplied, json.RejectUnknownMembers(true)); err != nil {
 		return nil, "", options, fmt.Errorf("decode Argo CD parameters: %w", err)
+	}
+	if supplied == nil {
+		return nil, "", options, fmt.Errorf("Argo CD parameters must be a JSON array")
 	}
 	var parameterFiles []string
 	seen := make(map[string]bool, len(supplied))
@@ -41,15 +47,27 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 		seen[parameter.Name] = true
 		switch parameter.Name {
 		case "entrypoint":
-			if parameter.String == "" {
+			if err := requireParameterShape(parameter, "string"); err != nil {
+				return nil, "", options, err
+			}
+			if *parameter.String == "" {
 				return nil, "", options, fmt.Errorf("entrypoint must not be empty")
 			}
-			entry = parameter.String
+			entry = *parameter.String
 		case "parameter-files":
-			parameterFiles = append(parameterFiles, parameter.Array...)
+			if err := requireParameterShape(parameter, "array"); err != nil {
+				return nil, "", options, err
+			}
+			parameterFiles = append(parameterFiles, (*parameter.Array)...)
 		case "parameters":
+			if err := requireParameterShape(parameter, "string"); err != nil {
+				return nil, "", options, err
+			}
+			if len(*parameter.String) > maxParameterFileSize {
+				return nil, "", options, fmt.Errorf("parameters JSON exceeds %d bytes", maxParameterFileSize)
+			}
 			var object map[string]jsontext.Value
-			if err := json.Unmarshal([]byte(parameter.String), &object); err != nil {
+			if err := json.Unmarshal([]byte(*parameter.String), &object); err != nil {
 				return nil, "", options, fmt.Errorf("decode parameters JSON: %w", err)
 			}
 			if object == nil {
@@ -59,8 +77,11 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 				return nil, "", options, err
 			}
 		case "allow-empty", "include-verify":
-			value := strings.EqualFold(parameter.String, "true")
-			if parameter.String != "" && !value && !strings.EqualFold(parameter.String, "false") {
+			if err := requireParameterShape(parameter, "string"); err != nil {
+				return nil, "", options, err
+			}
+			value := strings.EqualFold(*parameter.String, "true")
+			if !value && !strings.EqualFold(*parameter.String, "false") {
 				return nil, "", options, fmt.Errorf("parameter %q must be true or false", parameter.Name)
 			}
 			if parameter.Name == "allow-empty" {
@@ -77,9 +98,20 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 		if err != nil {
 			return nil, "", options, err
 		}
-		data, err := os.ReadFile(path)
+		file, err := os.Open(path)
 		if err != nil {
 			return nil, "", options, fmt.Errorf("read parameter file %q: %w", name, err)
+		}
+		data, readErr := io.ReadAll(io.LimitReader(file, maxParameterFileSize+1))
+		closeErr := file.Close()
+		if readErr != nil {
+			return nil, "", options, fmt.Errorf("read parameter file %q: %w", name, readErr)
+		}
+		if closeErr != nil {
+			return nil, "", options, fmt.Errorf("close parameter file %q: %w", name, closeErr)
+		}
+		if len(data) > maxParameterFileSize {
+			return nil, "", options, fmt.Errorf("parameter file %q exceeds %d bytes", name, maxParameterFileSize)
 		}
 		var object map[string]jsontext.Value
 		if err := json.Unmarshal(data, &object); err != nil {
@@ -96,6 +128,24 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 		return nil, "", options, err
 	}
 	return values, entry, options, nil
+}
+
+func requireParameterShape(parameter announcedParameter, shape string) error {
+	present := 0
+	if parameter.String != nil {
+		present++
+	}
+	if parameter.Array != nil {
+		present++
+	}
+	if parameter.Map != nil {
+		present++
+	}
+	valid := (shape == "string" && parameter.String != nil) || (shape == "array" && parameter.Array != nil) || (shape == "map" && parameter.Map != nil)
+	if present != 1 || !valid {
+		return fmt.Errorf("Argo CD parameter %q must use the %s field", parameter.Name, shape)
+	}
+	return nil
 }
 
 func mergeParameters(dst, src map[string]jsontext.Value) error {

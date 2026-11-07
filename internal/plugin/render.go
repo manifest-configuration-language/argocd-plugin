@@ -118,7 +118,7 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 		}
 		rendered.Write(data)
 	}
-	if rendered.Len() == 0 {
+	if rendered.Len() == 0 && !options.allowEmpty {
 		return fmt.Errorf("MCL produced an empty manifest stream")
 	}
 	_, err = output.Write(rendered.Bytes())

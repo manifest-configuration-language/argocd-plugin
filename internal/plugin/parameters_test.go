@@ -43,3 +43,22 @@ func TestProjectFileRejectsTraversalAndSymlinkEscape(t *testing.T) {
 		t.Fatal("projectFile() accepted a symlink outside the project")
 	}
 }
+
+func TestReadParametersRejectsMalformedArgoParameterShapes(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.mcl"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []string{
+		`null`,
+		`[{"name":"parameter-files","string":"params.json"}]`,
+		`[{"name":"allow-empty","array":["true"]}]`,
+		`[{"name":"entrypoint","string":"main.mcl","extra":true}]`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			if _, _, _, err := readParameters(input, root); err == nil {
+				t.Fatalf("readParameters() accepted malformed input %s", input)
+			}
+		})
+	}
+}
