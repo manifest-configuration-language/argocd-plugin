@@ -48,6 +48,30 @@ emit regular
 	}
 }
 
+func TestGenerateResolvesMonorepoImportsFromProjectRoot(t *testing.T) {
+	project := t.TempDir()
+	app := filepath.Join(project, "apps", "worker")
+	writeProjectFile(t, project, "mcl.toml", "")
+	writeProjectFile(t, project, "cluster.mcl", `export let clusterName = "monorepo-worker"
+`)
+	writeProjectFile(t, project, "apps/worker/main.mcl", `import "../../cluster.mcl" as cluster
+let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: cluster.clusterName
+emit resource
+`)
+
+	var output bytes.Buffer
+	if err := generateFrom(t.Context(), app, "[]", &output); err != nil {
+		t.Fatalf("generateFrom() error = %v", err)
+	}
+	if !strings.Contains(output.String(), "name: monorepo-worker") {
+		t.Fatalf("generated manifests do not include the project-root import:\n%s", output.String())
+	}
+}
+
 func TestGenerateRejectsCreateUpdateManifestDrift(t *testing.T) {
 	root := t.TempDir()
 	writeProjectFile(t, root, "main.mcl", `let options =
