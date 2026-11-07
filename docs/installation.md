@@ -1,8 +1,15 @@
 # インストール
 
-Argo CD v3.6.1のrepo-serverへCMP Sidecarを追加します。Helm Chartを使う場合はREADMEのValuesを`repoServer.extraContainers`へ設定します。Sidecarは`/var/run/argocd`と`/home/argocd/cmp-server/plugins`をrepo-serverと共有し、`/tmp`には専用emptyDirをマウントします。
+Argo CD v3.6.1のrepo-serverへCMP Sidecarを追加します。イメージはリリースタグまたは検証済みのマルチアーキテクチャDigestで固定してください。リリースイメージはGHCRで公開し、署名、SBOM、Provenanceを添付します。
 
-コンテナはUID 999、Read-only Root Filesystem、Capabilitiesなし、`RuntimeDefault` seccompで動作します。CMP Serverはイメージ内の`/var/run/argocd/argocd-cmp-server`から起動し、設定ファイルはイメージ内の`/home/argocd/cmp-server/config/plugin.yaml`にあります。
+Helm Chartを使う場合は[README](../README.md)のValuesを`repoServer.extraContainers`へ設定します。Helmを使わない場合は、既存overlayの`kustomization.yaml`に次のPatchを追加し、[argocd-repo-server-patch.yaml](../examples/install/kustomize/argocd-repo-server-patch.yaml)を参照してください。
+
+```yaml
+patches:
+  - path: argocd-repo-server-patch.yaml
+```
+
+Patchはrepo-server DeploymentにSidecarと専用`/tmp` volumeを追加します。SidecarはUID 999、Read-only Root Filesystem、Capabilitiesなし、`RuntimeDefault` seccompで動作します。CMP Serverはイメージ内の`/var/run/argocd/argocd-cmp-server`から起動し、設定ファイルはイメージ内の`/home/argocd/cmp-server/config/plugin.yaml`にあります。
 
 ## Application
 

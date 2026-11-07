@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-repo-server
+  namespace: argocd
+spec:
+  template:
+    spec:
+      containers:
+        - name: mcl
+          image: ghcr.io/manifest-configuration-language/argocd-plugin:v1.0.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /var/run/argocd/argocd-cmp-server
+          env:
+            - name: XDG_CACHE_HOME
+              value: /tmp/mcl-cache
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: var-files
+              mountPath: /var/run/argocd
+            - name: plugins
+              mountPath: /home/argocd/cmp-server/plugins
+            - name: mcl-tmp
+              mountPath: /tmp
+      volumes:
+        - name: mcl-tmp
+          emptyDir:
+            sizeLimit: 1Gi
