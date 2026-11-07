@@ -29,7 +29,7 @@ func readParameters(encoded, root string) (map[string]jsontext.Value, string, pl
 	values := make(map[string]jsontext.Value)
 	entry := "main.mcl"
 	options := pluginOptions{}
-	if encoded == "" {
+	if strings.TrimSpace(encoded) == "" || strings.TrimSpace(encoded) == "null" {
 		return values, entry, options, nil
 	}
 	var supplied []announcedParameter

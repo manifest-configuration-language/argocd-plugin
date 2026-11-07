@@ -50,7 +50,7 @@ func TestReadParametersRejectsMalformedArgoParameterShapes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, input := range []string{
-		`null`,
+		`[null]`,
 		`[{"name":"parameter-files","string":"params.json"}]`,
 		`[{"name":"allow-empty","array":["true"]}]`,
 		`[{"name":"entrypoint","string":"main.mcl","extra":true}]`,
@@ -60,5 +60,21 @@ func TestReadParametersRejectsMalformedArgoParameterShapes(t *testing.T) {
 				t.Fatalf("readParameters() accepted malformed input %s", input)
 			}
 		})
+	}
+}
+
+func TestReadParametersAcceptsNoParameters(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.mcl"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []string{"", "null", "  null  "} {
+		values, entry, options, err := readParameters(input, root)
+		if err != nil {
+			t.Fatalf("readParameters(%q) error = %v", input, err)
+		}
+		if len(values) != 0 || entry != "main.mcl" || options != (pluginOptions{}) {
+			t.Fatalf("readParameters(%q) = %v, %q, %+v; want defaults", input, values, entry, options)
+		}
 	}
 }
