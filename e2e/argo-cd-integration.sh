@@ -44,6 +44,20 @@ wait_for_sync_operation() {
   return 1
 }
 
+wait_for_completed_job() {
+  local job=$1
+  local deadline=$((SECONDS + 300))
+  while (( SECONDS < deadline )); do
+    if kubectl get -n default "job/$job" >/dev/null 2>&1; then
+      kubectl wait -n default --for=condition=complete "job/$job" --timeout=5m
+      return
+    fi
+    sleep 1
+  done
+  printf 'timed out waiting for Hook Job %s to be created\n' "$job" >&2
+  return 1
+}
+
 cat <<EOF | kubectl apply -f -
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -271,15 +285,17 @@ kubectl patch -n "$namespace" "application/$application" --type=merge \
   -p "{\"operation\":{\"sync\":{\"revision\":\"$E2E_REVISION\"}}}" >/dev/null
 wait_for_sync_operation "$previous_finished_at"
 kubectl wait -n default --for=create configmap/mcl-e2e-stable --timeout=5m
-kubectl delete -n "$namespace" "application/$application" --wait=true --timeout=3m
+kubectl delete -n "$namespace" "application/$application" --wait=false
 for hook in mcl-e2e-before-delete mcl-e2e-after-delete; do
-  kubectl wait -n default --for=condition=complete "job/$hook" --timeout=5m
+  wait_for_completed_job "$hook"
 done
+kubectl wait -n "$namespace" --for=delete "application/$application" --timeout=3m
 if kubectl get -n default configmap mcl-e2e-stable >/dev/null 2>&1; then
   printf 'PreDelete/PostDelete sync left the managed resource behind\n' >&2
   exit 1
 fi
-kubectl delete -n default job mcl-e2e-before-delete mcl-e2e-after-delete --wait=true
+kubectl delete -n default job mcl-e2e-before-delete mcl-e2e-after-delete \
+  --ignore-not-found=true --wait=true
 
 cat <<EOF | kubectl apply -f -
 apiVersion: argoproj.io/v1alpha1
