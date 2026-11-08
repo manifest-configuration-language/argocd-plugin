@@ -36,4 +36,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - run: kind load docker-image mcl-argocd:e2e --name mcl-argocd-e2e
-      - run: bash scripts/argo-integration.sh
+      - run: bash e2e/argo-cd-integration.sh
