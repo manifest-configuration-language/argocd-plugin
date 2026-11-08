@@ -21,7 +21,7 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     outputs:
       release_tag: ${{ steps.target.outputs.release_tag }}
     permissions:

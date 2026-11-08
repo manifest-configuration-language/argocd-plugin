@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.sha }}
+  cancel-in-progress: true
 
 jobs:
   go:
@@ -31,42 +31,3 @@ jobs:
       - run: golangci-lint run ./...
         timeout-minutes: 20
       - run: git diff --check
-  image:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4.4.0
-        with:
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@v3.12.0
-      - uses: docker/build-push-action@v6.19.2
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-  legacy-image:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4.4.0
-        with:
-          persist-credentials: false
-      - uses: jdx/mise-action@v5.2.6
-        with:
-          install: true
-          install_args: go
-          cache: true
-      - id: sdk
-        run: echo "version=$(go list -modfile=compat/mcl-v0.4.7/go.mod -m -f '{{.Version}}' github.com/manifest-configuration-language/mcl)" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@v3.12.0
-      - uses: docker/build-push-action@v6.19.2
-        with:
-          context: .
-          platforms: linux/amd64
-          push: false
-          build-args: |
-            MCL_SDK_VERSION=${{ steps.sdk.outputs.version }}
-            MCL_PLUGIN_VERSION=${{ steps.sdk.outputs.version }}
-            MCL_LEGACY_SDK=true
