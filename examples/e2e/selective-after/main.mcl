@@ -17,7 +17,7 @@ let hookResource =
         containers:
           - name: "selective-hook"
             image: "busybox:1.37.0"
-            command: ["sh", "-c", "echo selective-hook"]
+            command: ["sh", "-c", "exit 42"]
 let hook = lifecycle.attach(hookResource, ["before.create", "before.update"], 0, true, ["before-next-run", "on-success"])
 emit resource
 emit hook

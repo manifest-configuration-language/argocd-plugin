@@ -1,0 +1,18 @@
+let migration =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    generateName: "mcl-e2e-generated-hook-"
+    labels:
+      e2e: "generated-name-hook"
+  spec:
+    backoffLimit: 0
+    template:
+      spec:
+        restartPolicy: "Never"
+        containers:
+          - name: "generated-hook"
+            image: "busybox:1.37.0"
+            command: ["sh", "-c", "echo generated-hook"]
+let hook = lifecycle.attach(migration, ["before.create"], 0, true, ["on-success"])
+emit hook

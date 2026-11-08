@@ -4,7 +4,7 @@ Lifecycle付きArtifactをCreate、Update、Delete操作としてMCLにレンダ
 
 | MCL Lifecycle | Argo CD出力 |
 | --- | --- |
-| `bootstrap` | 通常Resource、負のSync Wave |
+| `bootstrap` | 通常Resource、mainより前のSync Wave |
 | `before.create`、`before.update` | `PreSync` |
 | `after.create`、`after.update` | `PostSync` |
 | `before.delete` | `PreDelete` |
@@ -13,6 +13,10 @@ Lifecycle付きArtifactをCreate、Update、Delete操作としてMCLにレンダ
 | `before.rollback`、`after.rollback` | 対応先がないためエラー |
 
 `before-next-run`、`on-success`、`on-failure`を`BeforeHookCreation`、`HookSucceeded`、`HookFailed`へ変換します。MCL Hook Priorityは`argocd.argoproj.io/sync-wave`へ設定します。HookのAnnotationに既存値がある場合、MCLが出す値と一致しなければエラーです。
+
+Hook Resourceでは`metadata.name`の代わりに`metadata.generateName`を指定できます。MCLはHook Lifecycleが付いたResourceに限って`generateName`を許可し、通常Resourceでは安定したIdentityとして`metadata.name`を要求します。Argo CDがSyncごとにJob名を生成するため、同じ`generateName` prefixのHookを繰り返し実行でき、`HookSucceeded`などのCleanup Policyで完了したJobを削除できます。
+
+Bootstrap PriorityはBootstrap同士の順序付けに使います。プラグインは各PriorityをArgo CD Waveへそのまま加算せず、すべての通常ResourceのWaveより前になる連続したWaveへ割り当てます。通常Resourceの最小WaveがArgo CDで扱える最小値の場合など、前のWaveを確保できない入力は明確なエラーになります。
 
 Argo CDはSync PhaseをSync Waveより先に実行します。そのため、通常Resourceとして適用する`bootstrap`は、どのWaveを指定しても`PreSync` Hookより先には実行できません。同じApplicationにBootstrap ResourceとPreSync Hookがある場合は、実行順序を保証できないため生成を失敗させます。CRDなどのBootstrap Resourceと、それに依存するHookは別Applicationに配置してください。CRDをHookにすると通常ResourceのTrackingやPruneの動作が変わるため、プラグインはCRDをHookへ変換しません。
 

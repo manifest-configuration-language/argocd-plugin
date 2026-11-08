@@ -1,19 +1,118 @@
 name: Release
+run-name: Release ${{ inputs.version }}
 
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version tag
+        required: true
+        default: v0.1.0
+        type: string
+
+permissions:
+  contents: read
 
 concurrency:
-  group: release
+  group: release-${{ github.repository }}
   cancel-in-progress: false
   queue: max
 
-permissions: {}
-
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      release_tag: ${{ steps.target.outputs.release_tag }}
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release request
+        id: target
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            printf 'Release workflow must run from the default branch (%s).\n' \
+              "$DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+          default_branch_sha="$(gh api \
+            "repos/$GITHUB_REPOSITORY/git/ref/heads/$DEFAULT_BRANCH" \
+            --jq '.object.sha')"
+          if [[ "$GITHUB_SHA" != "$default_branch_sha" ]]; then
+            printf 'Release workflow SHA %s is not the current %s tip (%s).\n' \
+              "$GITHUB_SHA" "$DEFAULT_BRANCH" "$default_branch_sha" >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            printf 'Release version must use stable vX.Y.Z format: %s\n' \
+              "$RELEASE_VERSION" >&2
+            exit 1
+          fi
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_VERSION"; then
+            printf 'Tag %s already exists; refusing to reuse it.\n' \
+              "$RELEASE_VERSION" >&2
+            exit 1
+          fi
+          latest="$(git tag --list 'v*' |
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
+            sort -V | tail -n 1 || true)"
+          if [[ -n "$latest" ]] && \
+             [[ "$(printf '%s\n%s\n' "$latest" "$RELEASE_VERSION" |
+               sort -V | tail -n 1)" != "$RELEASE_VERSION" ]]; then
+            printf 'Release version %s must be newer than the latest release %s.\n' \
+              "$RELEASE_VERSION" "$latest" >&2
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for CI and Argo CD integration checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for workflow in ci.yml argo-integration.yml; do
+            timeout=120
+            deadline=$((SECONDS + timeout))
+            run_id=""
+            while [[ -z "$run_id" ]]; do
+              run_id="$(gh run list \
+                --workflow "$workflow" \
+                --branch "$GITHUB_REF_NAME" \
+                --event push \
+                --commit "$GITHUB_SHA" \
+                --limit 1 \
+                --json databaseId \
+                --jq '.[0].databaseId // empty' 2>/dev/null || true)"
+              if [[ -n "$run_id" ]]; then
+                break
+              fi
+              if (( SECONDS >= deadline )); then
+                printf 'Timed out after %ss waiting for %s at %s.\n' \
+                  "$timeout" "$workflow" "$GITHUB_SHA" >&2
+                exit 1
+              fi
+              sleep 5
+            done
+            gh run watch "$run_id" --exit-status --compact
+          done
+
   publish:
+    needs: prepare
     strategy:
+      fail-fast: false
       matrix:
         include:
           - mcl-version: ''
@@ -25,7 +124,6 @@ jobs:
       packages: write
       id-token: write
       attestations: write
-
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -61,7 +159,7 @@ jobs:
         with:
           images: ghcr.io/manifest-configuration-language/argocd-plugin
           tags: |
-            type=raw,value=${{ github.ref_name }}${{ steps.sdk.outputs.tag_suffix }}
+            type=raw,value=${{ needs.prepare.outputs.release_tag }}${{ steps.sdk.outputs.tag_suffix }}
             type=sha,suffix=${{ steps.sdk.outputs.tag_suffix }}
       - uses: docker/build-push-action@v6.19.2
         id: build
@@ -90,7 +188,7 @@ jobs:
           push-to-registry: true
 
   release:
-    needs: publish
+    needs: [prepare, publish]
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -99,4 +197,6 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --generate-notes

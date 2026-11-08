@@ -17,6 +17,16 @@ Sidecarでは`ARGOCD_EXEC_TIMEOUT=10m`を設定し、`MCL_CACHE_DIRECTORY=/tmp/m
 
 CMPのコマンドタイムアウトは既定90秒、Application ControllerとRepo ServerのRPC timeoutは既定60秒です。MCLの評価上限10分を使うには、Helm Valuesの`configs.params`で`server.repo.server.timeout.seconds`と`controller.repo.server.timeout.seconds`を10分より長い秒数に設定してください。例として660秒を使います。Sidecar、Repo Server、Application Controllerの設定を揃えないと、MCLのContext deadline前にArgo CDが実行を終了します。
 
+入力ファイル追跡によるCMPへの転送最適化を使う場合は、Helm Valuesの`configs.params`へ次を追加します。この設定はArgo CD全体に適用されるため、各CMP Applicationに入力ファイル一覧のAnnotationも設定してください。
+
+```yaml
+configs:
+  params:
+    reposerver.plugin.use.manifest.generate.paths: "true"
+```
+
+Applicationのソースディレクトリで`mcl-argocd inputs`を実行し、出力を`argocd.argoproj.io/manifest-generate-paths`へ設定します。MCLのimportや依存を追加した場合は、コマンドを再実行してAnnotationを更新してください。古い一覧に新しい入力が含まれないと、repo-serverからCMPへファイルが転送されず、Manifest生成に失敗することがあります。詳しい例は[設定](configuration.md#入力ファイル追跡)を参照してください。
+
 ## Application
 
 ソースディレクトリに`main.mcl`を配置すればPlugin名の自動検出を使えます。プラグインは常に`main.mcl`を読み込みます。`parameter-files`にはソースディレクトリ内のJSONファイル名を配列で指定し、`parameters`には型を保持したJSONオブジェクト文字列を指定します。

@@ -19,16 +19,19 @@ import (
 )
 
 type renderedResource struct {
-	object    map[string]any
-	hooks     []string
-	cleanup   []string
-	wave      int
-	waveSet   bool
-	regular   bool
-	bootstrap bool
-	preSync   bool
-	scope     resourceScope
-	display   string
+	object               map[string]any
+	hooks                []string
+	cleanup              []string
+	wave                 int
+	waveSet              bool
+	regular              bool
+	main                 bool
+	bootstrap            bool
+	bootstrapPriority    int
+	bootstrapPrioritySet bool
+	preSync              bool
+	scope                resourceScope
+	display              string
 }
 
 type operationSpec struct {
@@ -36,7 +39,17 @@ type operationSpec struct {
 	phases []string
 }
 
-const verifyPhase = "verify"
+const (
+	beforeCreate   = "before.create"
+	beforeUpdate   = "before.update"
+	beforeDelete   = "before.delete"
+	beforeRollback = "before.rollback"
+	verifyPhase    = "verify"
+	afterCreate    = "after.create"
+	afterUpdate    = "after.update"
+	afterDelete    = "after.delete"
+	afterRollback  = "after.rollback"
+)
 
 // Generate evaluates the selected MCL project and writes a complete Argo CD manifest stream.
 func Generate(ctx context.Context, encodedParameters string, output io.Writer) error {
@@ -72,11 +85,16 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 		if err != nil {
 			return fmt.Errorf("evaluate MCL %s operation: %w", operation.name, err)
 		}
+		identityResolver, err := newResourceIdentityResolver(bundle)
+		if err != nil {
+			return fmt.Errorf("prepare MCL %s resource identity resolver: %w", operation.name, err)
+		}
 		for _, phase := range operation.phases {
 			artifacts, err := mcl.RenderPhaseArtifacts(bundle, phase)
 			if err != nil {
 				return fmt.Errorf("render MCL %s phase: %w", phase, err)
 			}
+			generatedOrdinals := make(map[string]int)
 			for _, artifact := range artifacts {
 				if strings.Contains(phase, "rollback") {
 					return fmt.Errorf("MCL lifecycle event %q has no Argo CD equivalent", phase)
@@ -88,9 +106,15 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 				if err != nil {
 					return fmt.Errorf("decode MCL resource in phase %q: %w", phase, err)
 				}
-				resourceID, err := resourceIdentity(bundle, object, destinationNamespace)
+				resourceID, err := identityResolver(object, destinationNamespace, lifecycleSupportsGeneratedName(artifact.Lifecycle))
 				if err != nil {
 					return err
+				}
+				if resourceID.generatedName {
+					ordinalKey := resourceID.key + "\x00" + artifact.Lifecycle.Origin
+					ordinal := generatedOrdinals[ordinalKey]
+					generatedOrdinals[ordinalKey] = ordinal + 1
+					resourceID.key += "\x00generated\x00" + artifact.Lifecycle.Origin + "\x00" + strconv.Itoa(ordinal)
 				}
 				applyDestinationNamespace(object, resourceID.scope, resourceID.namespace)
 				identity := resourceID.key
@@ -127,6 +151,9 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 	}
 	if hasBootstrap && hasPreSync {
 		return errors.New("MCL bootstrap resources cannot run before PreSync hooks in one Argo CD Application because phases precede waves; put bootstrap resources in a separate Application")
+	}
+	if err := assignBootstrapWaves(resources); err != nil {
+		return err
 	}
 	if len(resources) == 0 && !options.allowEmpty {
 		return errors.New("MCL produced no Kubernetes resources")
@@ -171,7 +198,7 @@ func applyDestinationNamespace(object map[string]any, scope resourceScope, names
 }
 
 func operationsFor(options pluginOptions) []operationSpec {
-	operations := []operationSpec{{"create", []string{"bootstrap", "before.create", "main", "after.create"}}, {"update", []string{"before.update", "main", "after.update"}}, {"delete", []string{"before.delete", "after.delete"}}, {"rollback", []string{"before.rollback", "after.rollback"}}}
+	operations := []operationSpec{{"create", []string{"bootstrap", beforeCreate, "main", afterCreate}}, {"update", []string{beforeUpdate, "main", afterUpdate}}, {"delete", []string{beforeDelete, afterDelete}}, {"rollback", []string{beforeRollback, afterRollback}}}
 	if options.includeVerify {
 		operations = append(operations, operationSpec{verifyPhase, []string{verifyPhase}})
 	}
@@ -288,6 +315,7 @@ type resourceIdentityValue struct {
 	name          string
 	namespace     string
 	scope         resourceScope
+	generatedName bool
 }
 
 func assignLifecycle(item *renderedResource, phase string, lifecycle mcl.Lifecycle) error {
@@ -297,29 +325,27 @@ func assignLifecycle(item *renderedResource, phase string, lifecycle mcl.Lifecyc
 		}
 		if phase == "main" && event == "main" {
 			item.regular = true
+			item.main = true
 		}
 		if phase == "bootstrap" && event == "bootstrap" {
 			item.regular = true
 			item.bootstrap = true
-			wave := -1000 + lifecycle.Priority
-			if item.waveSet && wave != item.wave {
-				return fmt.Errorf("MCL lifecycle events assign conflicting sync waves %d and %d", item.wave, wave)
+			if item.bootstrapPrioritySet && lifecycle.Priority != item.bootstrapPriority {
+				return fmt.Errorf("MCL lifecycle events assign conflicting bootstrap priorities %d and %d", item.bootstrapPriority, lifecycle.Priority)
 			}
-			if !item.waveSet || wave < item.wave {
-				item.wave = wave
-				item.waveSet = true
-			}
+			item.bootstrapPriority = lifecycle.Priority
+			item.bootstrapPrioritySet = true
 		}
 		var hook string
 		switch {
-		case (phase == "before.create" || phase == "before.update") && (event == "before.create" || event == "before.update"):
+		case (phase == beforeCreate || phase == beforeUpdate) && (event == beforeCreate || event == beforeUpdate):
 			hook = "PreSync"
 			item.preSync = true
-		case (phase == "after.create" || phase == "after.update") && (event == "after.create" || event == "after.update"):
+		case (phase == afterCreate || phase == afterUpdate) && (event == afterCreate || event == afterUpdate):
 			hook = "PostSync"
-		case phase == "before.delete" && event == "before.delete":
+		case phase == beforeDelete && event == beforeDelete:
 			hook = "PreDelete"
-		case phase == "after.delete" && event == "after.delete":
+		case phase == afterDelete && event == afterDelete:
 			hook = "PostDelete"
 		case phase == verifyPhase && event == verifyPhase:
 			hook = "PostSync"
@@ -338,6 +364,87 @@ func assignLifecycle(item *renderedResource, phase string, lifecycle mcl.Lifecyc
 	}
 
 	return nil
+}
+
+func assignBootstrapWaves(resources map[string]*renderedResource) error {
+	priorities := make([]int, 0)
+	minMainWave := int64(0)
+	for _, item := range resources {
+		if item.bootstrap {
+			if item.main || len(item.hooks) > 0 {
+				return fmt.Errorf("resource %s cannot be both MCL bootstrap and another lifecycle resource", item.display)
+			}
+			priorities = append(priorities, item.bootstrapPriority)
+
+			continue
+		}
+		if !item.main {
+			continue
+		}
+
+		wave, err := regularResourceWave(item)
+		if err != nil {
+			return fmt.Errorf("resource %s: %w", item.display, err)
+		}
+		if wave < minMainWave {
+			minMainWave = wave
+		}
+	}
+	if len(priorities) == 0 {
+		return nil
+	}
+	slices.Sort(priorities)
+	priorities = slices.Compact(priorities)
+	firstWave := minMainWave - int64(len(priorities))
+	if firstWave < -(1 << 31) {
+		return errors.New("MCL bootstrap priorities cannot be placed before all main resources within Argo CD's supported sync-wave range")
+	}
+	waves := make(map[int]int, len(priorities))
+	for index, priority := range priorities {
+		waves[priority] = int(firstWave + int64(index))
+	}
+	for _, item := range resources {
+		if item.bootstrap {
+			item.wave = waves[item.bootstrapPriority]
+			item.waveSet = true
+		}
+	}
+
+	return nil
+}
+
+func regularResourceWave(item *renderedResource) (int64, error) {
+	metadata, _ := item.object["metadata"].(map[string]any)
+	annotations, _ := metadata["annotations"].(map[string]any)
+	value, exists := annotations["argocd.argoproj.io/sync-wave"]
+	if !exists {
+		return 0, nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return 0, errors.New("argo cd sync-wave annotation must be a string")
+	}
+	wave, err := strconv.ParseInt(text, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid Argo CD sync-wave annotation %q", text)
+	}
+
+	return wave, nil
+}
+
+func lifecycleSupportsGeneratedName(lifecycle mcl.Lifecycle) bool {
+	if len(lifecycle.Events) == 0 {
+		return false
+	}
+	for _, event := range lifecycle.Events {
+		switch event {
+		case beforeCreate, afterCreate, beforeUpdate, afterUpdate, beforeDelete, afterDelete, beforeRollback, afterRollback, verifyPhase:
+		default:
+			return false
+		}
+	}
+
+	return true
 }
 
 func applyLifecycle(item *renderedResource) error {

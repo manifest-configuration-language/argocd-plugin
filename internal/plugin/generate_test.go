@@ -44,6 +44,40 @@ emit regular
 	}
 }
 
+func TestGenerateRendersGeneratedNameHook(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", `let hookResource =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    generateName: "migration-"
+  spec:
+    template:
+      spec:
+        restartPolicy: "Never"
+        containers:
+          - name: "migration"
+            image: "busybox:1.37.0"
+            command: ["sh", "-c", "echo migration"]
+let hook = lifecycle.attach(hookResource, ["before.create", "before.update"], 0, true, ["on-success"])
+emit hook
+`)
+	var output bytes.Buffer
+	if err := generateFrom(t.Context(), root, "[]", &output); err != nil {
+		t.Fatalf("generateFrom() rejected a Hook with metadata.generateName: %v", err)
+	}
+	if !strings.Contains(output.String(), "generateName: migration-") ||
+		!strings.Contains(output.String(), "argocd.argoproj.io/hook: PreSync") ||
+		!strings.Contains(output.String(), "argocd.argoproj.io/hook-delete-policy: HookSucceeded") {
+		t.Fatalf("generated-name Hook was not rendered with its lifecycle:\n%s", output.String())
+	}
+	if strings.Contains(output.String(), "name: migration-") {
+		t.Fatalf("plugin replaced metadata.generateName with metadata.name:\n%s", output.String())
+	}
+}
+
 func TestGenerateKeepsBootstrapAsRegularResource(t *testing.T) {
 	t.Parallel()
 
@@ -75,7 +109,7 @@ emit bootstrap
 	if err := generateFrom(t.Context(), root, "[]", &output); err != nil {
 		t.Fatalf("generateFrom() error = %v", err)
 	}
-	if !strings.Contains(output.String(), "kind: CustomResourceDefinition") || strings.Contains(output.String(), "namespace: default") || !strings.Contains(output.String(), "argocd.argoproj.io/sync-wave: \"-1000\"") || strings.Contains(output.String(), "argocd.argoproj.io/hook:") {
+	if !strings.Contains(output.String(), "kind: CustomResourceDefinition") || strings.Contains(output.String(), "namespace: default") || !strings.Contains(output.String(), "argocd.argoproj.io/sync-wave: \"-1\"") || strings.Contains(output.String(), "argocd.argoproj.io/hook:") {
 		t.Fatalf("bootstrap CRD was not kept as a regular resource:\n%s", output.String())
 	}
 }

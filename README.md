@@ -77,6 +77,16 @@ Argo CDはSelective SyncでSync Hookを実行しません。Prune、Diff、Healt
 
 `mcl-argocd inputs`は`main.mcl`、指定した`parameter-files`、MCL評価で読み込んだファイルをセミコロン区切りで出力します。出力はApplicationのsource pathを基準にする`argocd.argoproj.io/manifest-generate-paths`の値として使えます。入力一覧はUIパラメータとしてAnnouncementしません。
 
+この転送最適化を使う場合は、Argo CD Helm Valuesで次を有効にし、各Applicationへ`mcl-argocd inputs`の出力をAnnotationとして設定してください。
+
+```yaml
+configs:
+  params:
+    reposerver.plugin.use.manifest.generate.paths: "true"
+```
+
+MCLのimportや依存を追加した場合は、入力一覧を再生成してApplicationのAnnotationを更新します。古い一覧では新しい入力がCMPへ転送されず、Manifest生成に失敗することがあります。設定例は[設定](docs/configuration.md#入力ファイル追跡)を参照してください。
+
 ## セキュリティと制約
 
 既定ではGit認証情報を共有せず、ファイル実行権限を保持しません。MCLのLockファイルに固定された依存だけを取得し、レンダリング中にLockを更新しません。評価には10分の上限を設けています。Git認証が必要な場合の有効化方法とアクセス範囲は[セキュリティ設定](docs/security.md#git認証)を参照してください。

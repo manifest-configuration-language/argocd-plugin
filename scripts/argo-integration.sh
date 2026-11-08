@@ -22,6 +22,27 @@ kubectl patch -n "$namespace" deployment/argocd-repo-server \
   --type=strategic --patch-file "$patch_file"
 kubectl rollout status -n "$namespace" deployment/argocd-repo-server --timeout=5m
 
+wait_for_sync_operation() {
+  local previous_finished_at=$1
+  local deadline=$((SECONDS + 300))
+  local operation_state phase finished_at
+  while (( SECONDS < deadline )); do
+    operation_state="$(kubectl get -n "$namespace" "application/$application" -o json)"
+    phase="$(jq -r '.status.operationState.phase // empty' <<<"$operation_state")"
+    finished_at="$(jq -r '.status.operationState.finishedAt // empty' <<<"$operation_state")"
+    if [[ -n "$finished_at" && "$finished_at" != "$previous_finished_at" ]]; then
+      if [[ "$phase" != "Succeeded" ]]; then
+        jq -r '.status.operationState.message // "sync operation failed"' <<<"$operation_state" >&2
+        return 1
+      fi
+      return 0
+    fi
+    sleep 2
+  done
+  printf 'timed out waiting for the new sync operation to finish\n' >&2
+  return 1
+}
+
 cat <<EOF | kubectl apply -f -
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -122,6 +143,194 @@ if kubectl get -n default configmap mcl-multi-source >/dev/null 2>&1 ||
   printf 'Application deletion left multi-source resources behind\n' >&2
   exit 1
 fi
+
+cat <<EOF | kubectl apply -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: $application
+  namespace: $namespace
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/$E2E_REPOSITORY.git
+    targetRevision: $E2E_REVISION
+    path: examples/e2e/initial
+    plugin:
+      name: mcl
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+EOF
+
+kubectl wait -n "$namespace" --for='jsonpath={.status.sync.status}=Synced' \
+  "application/$application" --timeout=5m
+kubectl wait -n default --for='jsonpath={.data.value}=before' \
+  configmap/mcl-e2e-stable --timeout=5m
+kubectl get -n default configmap mcl-e2e-stale >/dev/null
+kubectl patch -n "$namespace" "application/$application" --type=merge \
+  -p '{"spec":{"source":{"path":"examples/e2e/updated"}}}' >/dev/null
+kubectl wait -n "$namespace" --for='jsonpath={.status.sync.status}=Synced' \
+  "application/$application" --timeout=5m
+kubectl wait -n default --for='jsonpath={.data.value}=after' \
+  configmap/mcl-e2e-stable --timeout=5m
+if kubectl get -n default configmap mcl-e2e-stale >/dev/null 2>&1; then
+  printf 'automatic Prune left the stale resource after the source update\n' >&2
+  exit 1
+fi
+kubectl delete -n "$namespace" "application/$application" --wait=true --timeout=3m
+if kubectl get -n default configmap mcl-e2e-stable >/dev/null 2>&1; then
+  printf 'Application deletion left the updated resource behind\n' >&2
+  exit 1
+fi
+
+cat <<EOF | kubectl apply -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: $application
+  namespace: $namespace
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/$E2E_REPOSITORY.git
+    targetRevision: $E2E_REVISION
+    path: examples/e2e/selective-before
+    plugin:
+      name: mcl
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+EOF
+
+previous_finished_at="$(kubectl get -n "$namespace" "application/$application" \
+  -o 'jsonpath={.status.operationState.finishedAt}')"
+kubectl patch -n "$namespace" "application/$application" --type=merge \
+  -p "{\"operation\":{\"sync\":{\"revision\":\"$E2E_REVISION\"}}}" >/dev/null
+wait_for_sync_operation "$previous_finished_at"
+kubectl wait -n default --for=create configmap/mcl-e2e-selective --timeout=5m
+if kubectl get -n default job mcl-e2e-selective-hook >/dev/null 2>&1; then
+  printf 'the initial full sync did not clean up its successful Hook\n' >&2
+  exit 1
+fi
+
+previous_finished_at="$(kubectl get -n "$namespace" "application/$application" \
+  -o 'jsonpath={.status.operationState.finishedAt}')"
+kubectl patch -n "$namespace" "application/$application" --type=merge \
+  -p "{\"spec\":{\"source\":{\"path\":\"examples/e2e/selective-after\"}},\"operation\":{\"sync\":{\"revision\":\"$E2E_REVISION\",\"resources\":[{\"group\":\"\",\"kind\":\"ConfigMap\",\"name\":\"mcl-e2e-selective\",\"namespace\":\"default\"}]}}}" >/dev/null
+wait_for_sync_operation "$previous_finished_at"
+kubectl wait -n default --for='jsonpath={.data.value}=after' \
+  configmap/mcl-e2e-selective --timeout=5m
+if ! kubectl get -n "$namespace" "application/$application" -o json |
+  jq -e '.status.operationState.syncResult.resources | any(.kind == "ConfigMap" and .name == "mcl-e2e-selective") and all(.kind != "Job")' >/dev/null; then
+  printf 'Selective Sync did not limit the operation to the selected ConfigMap\n' >&2
+  exit 1
+fi
+if kubectl get -n default job mcl-e2e-selective-hook >/dev/null 2>&1; then
+  printf 'Selective Sync unexpectedly executed the Hook\n' >&2
+  exit 1
+fi
+kubectl delete -n "$namespace" "application/$application" --wait=true --timeout=3m
+if kubectl get -n default configmap mcl-e2e-selective >/dev/null 2>&1; then
+  printf 'Application deletion left the selective-sync resource behind\n' >&2
+  exit 1
+fi
+
+cat <<EOF | kubectl apply -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: $application
+  namespace: $namespace
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/$E2E_REPOSITORY.git
+    targetRevision: $E2E_REVISION
+    path: examples/e2e/delete
+    plugin:
+      name: mcl
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+EOF
+
+previous_finished_at="$(kubectl get -n "$namespace" "application/$application" \
+  -o 'jsonpath={.status.operationState.finishedAt}')"
+kubectl patch -n "$namespace" "application/$application" --type=merge \
+  -p "{\"operation\":{\"sync\":{\"revision\":\"$E2E_REVISION\"}}}" >/dev/null
+wait_for_sync_operation "$previous_finished_at"
+kubectl wait -n default --for=create configmap/mcl-e2e-stable --timeout=5m
+kubectl delete -n "$namespace" "application/$application" --wait=true --timeout=3m
+for hook in mcl-e2e-before-delete mcl-e2e-after-delete; do
+  kubectl wait -n default --for=condition=complete "job/$hook" --timeout=5m
+done
+if kubectl get -n default configmap mcl-e2e-stable >/dev/null 2>&1; then
+  printf 'PreDelete/PostDelete sync left the managed resource behind\n' >&2
+  exit 1
+fi
+kubectl delete -n default job mcl-e2e-before-delete mcl-e2e-after-delete --wait=true
+
+cat <<EOF | kubectl apply -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: $application
+  namespace: $namespace
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/$E2E_REPOSITORY.git
+    targetRevision: $E2E_REVISION
+    path: examples/e2e/generated-name-hook
+    plugin:
+      name: mcl
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+EOF
+
+previous_finished_at="$(kubectl get -n "$namespace" "application/$application" \
+  -o 'jsonpath={.status.operationState.finishedAt}')"
+kubectl patch -n "$namespace" "application/$application" --type=merge \
+  -p "{\"operation\":{\"sync\":{\"revision\":\"$E2E_REVISION\"}}}" >/dev/null
+wait_for_sync_operation "$previous_finished_at"
+first_generated_job="$(kubectl get -n "$namespace" "application/$application" -o json |
+  jq -r '[.status.operationState.syncResult.resources[] | select(.kind == "Job" and .hookPhase == "Succeeded" and (.name | startswith("mcl-e2e-generated-hook-"))) | .name] | if length == 1 then .[0] else empty end')"
+if [[ -z "$first_generated_job" ]]; then
+  printf 'the first generateName Hook did not produce exactly one successful Job\n' >&2
+  exit 1
+fi
+if kubectl get -n default job "$first_generated_job" >/dev/null 2>&1 ||
+  [[ "$(kubectl get -n default jobs -l e2e=generated-name-hook -o json | jq '.items | length')" != 0 ]]; then
+  printf 'HookSucceeded did not clean up the first generated-name Job\n' >&2
+  exit 1
+fi
+
+previous_finished_at="$(kubectl get -n "$namespace" "application/$application" \
+  -o 'jsonpath={.status.operationState.finishedAt}')"
+kubectl patch -n "$namespace" "application/$application" --type=merge \
+  -p "{\"operation\":{\"sync\":{\"revision\":\"$E2E_REVISION\"}}}" >/dev/null
+wait_for_sync_operation "$previous_finished_at"
+second_generated_job="$(kubectl get -n "$namespace" "application/$application" -o json |
+  jq -r '[.status.operationState.syncResult.resources[] | select(.kind == "Job" and .hookPhase == "Succeeded" and (.name | startswith("mcl-e2e-generated-hook-"))) | .name] | if length == 1 then .[0] else empty end')"
+if [[ -z "$second_generated_job" || "$second_generated_job" == "$first_generated_job" ]]; then
+  printf 'a repeated sync did not create a distinct generateName Hook Job\n' >&2
+  exit 1
+fi
+if kubectl get -n default job "$second_generated_job" >/dev/null 2>&1 ||
+  [[ "$(kubectl get -n default jobs -l e2e=generated-name-hook -o json | jq '.items | length')" != 0 ]]; then
+  printf 'HookSucceeded did not clean up the repeated generated-name Job\n' >&2
+  exit 1
+fi
+kubectl delete -n "$namespace" "application/$application" --wait=true --timeout=3m
 
 cat <<EOF | kubectl apply -f -
 apiVersion: argoproj.io/v1alpha1
