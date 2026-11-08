@@ -2,7 +2,7 @@
 
 各CMP Sidecarイメージは、ビルド時に選択したMCL SDKと対応する`mcl.lock`のToolchain identityを使います。レンダリング中にMCLをダウンロードしません。
 
-同じArgo CDで複数のMCL Toolchainを使う場合は、ToolchainごとのイメージをSidecarとして追加します。現行イメージは`mcl`として登録されます。Release WorkflowはMCL v0.4.7対応イメージへ`v1.0.0-mcl-v0.4.7`の形式でタグを付け、Argo CD上では`mcl-v0.4.7`として登録します。
+同じArgo CDで複数のMCL Toolchainを使う場合は、ToolchainごとのイメージをSidecarとして追加します。現行イメージは`mcl`として登録されます。Release WorkflowはMCL v0.4.7対応イメージへ`v0.1.0-mcl-v0.4.7`の形式でタグを付け、Argo CD上では`mcl-v0.4.7`として登録します。
 
 ```yaml
 spec:

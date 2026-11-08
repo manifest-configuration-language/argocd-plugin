@@ -8,7 +8,7 @@ spec:
     spec:
       containers:
         - name: mcl
-          image: ghcr.io/manifest-configuration-language/argocd-plugin:v1.0.0
+          image: ghcr.io/manifest-configuration-language/argocd-plugin:v0.1.0
           imagePullPolicy: IfNotPresent
           command:
             - /var/run/argocd/argocd-cmp-server

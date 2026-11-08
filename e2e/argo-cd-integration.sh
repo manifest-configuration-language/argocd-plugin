@@ -17,7 +17,7 @@ kubectl wait -n "$namespace" --for=condition=Available deployment/argocd-repo-se
 
 patch_file="$(mktemp)"
 trap 'rm -f "$patch_file"' EXIT
-sed "s#ghcr.io/manifest-configuration-language/argocd-plugin:v1.0.0#$plugin_image#" \
+sed "s#ghcr.io/manifest-configuration-language/argocd-plugin:v0.1.0#$plugin_image#" \
   examples/install/kustomize/argocd-repo-server-patch.yaml > "$patch_file"
 kubectl patch -n "$namespace" deployment/argocd-repo-server \
   --type=strategic --patch-file "$patch_file"

@@ -18,7 +18,6 @@ workflows:
         - 'docker/login-action@v3.7.0'
         - 'docker/metadata-action@v5.10.0'
         - 'docker/setup-buildx-action@v3.12.0'
-        - 'docker/setup-qemu-action@v3.7.0'
         - 'jdx/mise-action@v5.2.6'
         - 'sigstore/cosign-installer@v3.9.1'
 dependencies:
@@ -65,11 +64,6 @@ dependencies:
         commit: 'sha1-8d2750c68a42422c14e847fe6c8ac0403b4cbd6f'
         owner_id: 5429470
         repo_id: 288485773
-    'docker/setup-qemu-action@v3.7.0':
-        ref: 'v3.7.0'
-        commit: 'sha1-c7c53464625b32c7a7e944ae62b3e17d2b600130'
-        owner_id: 5429470
-        repo_id: 288487894
     'helm/kind-action@v1.14.0':
         ref: 'v1.14.0'
         commit: 'sha1-ef37e7f390d99f746eb8b610417061a60e82a6cc'

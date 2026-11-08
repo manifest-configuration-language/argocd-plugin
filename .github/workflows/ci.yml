@@ -25,9 +25,14 @@ jobs:
           install: true
           install_args: go golangci-lint
           cache: true
-      - run: go test ./...
-        timeout-minutes: 20
-      - run: go vet ./...
-      - run: golangci-lint run ./...
-        timeout-minutes: 20
+      - parallel:
+          - name: Go tests
+            timeout-minutes: 20
+            run: go test ./...
+          - name: Go vet
+            timeout-minutes: 20
+            run: go vet ./...
+          - name: golangci-lint
+            timeout-minutes: 20
+            run: golangci-lint run ./...
       - run: git diff --check
