@@ -8,6 +8,7 @@ namespace=argocd
 application=mcl-plugin-e2e
 crd=widgets.e2e.example.com
 cluster_role=mcl-e2e-bootstrap-review
+plugin_image=${MCL_PLUGIN_IMAGE:-mcl-argocd:e2e}
 
 kubectl create namespace "$namespace" --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply --server-side --force-conflicts -n "$namespace" \
@@ -16,7 +17,7 @@ kubectl wait -n "$namespace" --for=condition=Available deployment/argocd-repo-se
 
 patch_file="$(mktemp)"
 trap 'rm -f "$patch_file"' EXIT
-sed 's#ghcr.io/manifest-configuration-language/argocd-plugin:v1.0.0#mcl-argocd:e2e#' \
+sed "s#ghcr.io/manifest-configuration-language/argocd-plugin:v1.0.0#$plugin_image#" \
   examples/install/kustomize/argocd-repo-server-patch.yaml > "$patch_file"
 kubectl patch -n "$namespace" deployment/argocd-repo-server \
   --type=strategic --patch-file "$patch_file"
