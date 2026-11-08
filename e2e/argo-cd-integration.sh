@@ -196,6 +196,8 @@ kind: Application
 metadata:
   name: $application
   namespace: $namespace
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
