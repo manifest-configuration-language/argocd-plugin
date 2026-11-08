@@ -3,7 +3,9 @@ package plugin
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,6 +77,69 @@ emit hook
 	}
 	if strings.Contains(output.String(), "name: migration-") {
 		t.Fatalf("plugin replaced metadata.generateName with metadata.name:\n%s", output.String())
+	}
+	if got := strings.Count(output.String(), "generateName: migration-"); got != 1 {
+		t.Fatalf("the same generated-name Artifact from Create and Update rendered %d times, want one merged Hook:\n%s", got, output.String())
+	}
+}
+
+func TestGenerateKeepsGeneratedNameHooksWithSamePrefixDistinct(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", `let beforeResource =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    generateName: "migration-"
+    labels:
+      step: "before"
+  spec:
+    template:
+      spec:
+        restartPolicy: "Never"
+        containers:
+          - name: "migration"
+            image: "busybox:1.37.0"
+let afterResource =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    generateName: "migration-"
+    labels:
+      step: "after"
+  spec:
+    template:
+      spec:
+        restartPolicy: "Never"
+        containers:
+          - name: "migration"
+            image: "busybox:1.37.0"
+let before = lifecycle.attach(beforeResource, ["before.create"], 0, true, [])
+let after = lifecycle.attach(afterResource, ["after.create"], 0, true, [])
+emit before
+emit after
+`)
+	var output bytes.Buffer
+	if err := generateFrom(t.Context(), root, "[]", &output); err != nil {
+		t.Fatalf("generateFrom() rejected distinct generated-name Hooks: %v", err)
+	}
+	hooks := make(map[string]int)
+	decoder := yaml.NewDecoder(&output)
+	for {
+		var document map[string]any
+		if err := decoder.Decode(&document); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("decode generated manifest: %v", err)
+		}
+		metadata := document["metadata"].(map[string]any)
+		annotations := metadata["annotations"].(map[string]any)
+		hooks[annotations["argocd.argoproj.io/hook"].(string)]++
+	}
+	if len(hooks) != 2 || hooks["PostSync"] != 1 || hooks["PreSync"] != 1 {
+		t.Fatalf("generated-name Hooks = %v, want distinct PostSync and PreSync resources", hooks)
 	}
 }
 
@@ -290,10 +355,7 @@ emit resource
 	if err := listInputFilesFrom(t.Context(), filepath.Join(root, "apps/worker"), parameters, "apps/worker", &output); err != nil {
 		t.Fatalf("listInputFilesFrom() error = %v", err)
 	}
-	inputs := []string{"main.mcl", "params.json"}
-	if readFilesAvailable {
-		inputs = append(inputs, "../../cluster.mcl", "../../mcl.toml")
-	}
+	inputs := []string{"main.mcl", "params.json", "../../cluster.mcl", "../../mcl.toml"}
 	for _, input := range inputs {
 		if !strings.Contains(output.String(), input) {
 			t.Errorf("input list %s does not contain input %q", output.String(), input)
@@ -302,7 +364,7 @@ emit resource
 	if !strings.HasSuffix(output.String(), "\n") {
 		t.Fatalf("input list %q does not end in a newline", output.String())
 	}
-	if readFilesAvailable && !strings.Contains(output.String(), "../../cluster.mcl") {
+	if !strings.Contains(output.String(), "../../cluster.mcl") {
 		t.Errorf("input list %q does not contain the monorepo import relative to the Application source", output.String())
 	}
 }

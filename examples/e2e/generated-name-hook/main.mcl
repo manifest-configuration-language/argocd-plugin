@@ -14,5 +14,24 @@ let migration =
           - name: "generated-hook"
             image: "busybox:1.37.0"
             command: ["sh", "-c", "echo generated-hook"]
-let hook = lifecycle.attach(migration, ["before.create"], 0, true, ["on-success"])
-emit hook
+let beforeHook = lifecycle.attach(migration, ["before.create"], 0, true, ["on-success"])
+let postMigration =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    generateName: "mcl-e2e-generated-hook-"
+    labels:
+      e2e: "generated-name-hook"
+      step: "post"
+  spec:
+    backoffLimit: 0
+    template:
+      spec:
+        restartPolicy: "Never"
+        containers:
+          - name: "generated-hook"
+            image: "busybox:1.37.0"
+            command: ["sh", "-c", "echo generated-post-hook"]
+let afterHook = lifecycle.attach(postMigration, ["after.create"], 0, true, ["on-success"])
+emit beforeHook
+emit afterHook

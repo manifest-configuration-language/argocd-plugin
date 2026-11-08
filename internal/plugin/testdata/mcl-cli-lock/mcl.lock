@@ -1,7 +1,7 @@
 {
   "version": 4,
   "toolchain": {
-    "mcl": "v0.4.8-0.20261108050330-beceed2d0a6b",
+    "mcl": "v0.4.8-0.20261108083610-28a6104d1908",
     "revision": "",
     "modified": "",
     "go": "go1.27.3",

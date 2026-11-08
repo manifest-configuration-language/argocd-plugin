@@ -49,4 +49,6 @@ jobs:
           - name: golangci-lint
             timeout-minutes: 20
             run: golangci-lint run ./...
+      - name: Build linux/arm64
+        run: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o "${{ runner.temp }}/mcl-argocd-arm64" ./cmd/mcl-argocd
       - run: git diff --check

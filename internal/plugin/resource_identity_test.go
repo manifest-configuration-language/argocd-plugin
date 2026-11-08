@@ -1,5 +1,3 @@
-//go:build !mcl_without_read_files
-
 package plugin
 
 import (

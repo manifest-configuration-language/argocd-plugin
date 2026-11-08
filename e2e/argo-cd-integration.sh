@@ -321,14 +321,13 @@ previous_finished_at="$(kubectl get -n "$namespace" "application/$application" \
 kubectl patch -n "$namespace" "application/$application" --type=merge \
   -p "{\"operation\":{\"sync\":{\"revision\":\"$E2E_REVISION\"}}}" >/dev/null
 wait_for_sync_operation "$previous_finished_at"
-first_generated_job="$(kubectl get -n "$namespace" "application/$application" -o json |
-  jq -r '[.status.operationState.syncResult.resources[] | select(.kind == "Job" and .hookPhase == "Succeeded" and (.name | startswith("mcl-e2e-generated-hook-"))) | .name] | if length == 1 then .[0] else empty end')"
-if [[ -z "$first_generated_job" ]]; then
-  printf 'the first generateName Hook did not produce exactly one successful Job\n' >&2
+first_generated_jobs="$(kubectl get -n "$namespace" "application/$application" -o json |
+  jq -c '[.status.operationState.syncResult.resources[] | select(.kind == "Job" and .hookPhase == "Succeeded" and (.name | startswith("mcl-e2e-generated-hook-"))) | .name] | sort | if length == 2 and (unique | length) == 2 then . else empty end')"
+if [[ -z "$first_generated_jobs" ]]; then
+  printf 'the first sync did not execute two distinct generated-name Hooks successfully\n' >&2
   exit 1
 fi
-if kubectl get -n default job "$first_generated_job" >/dev/null 2>&1 ||
-  [[ "$(kubectl get -n default jobs -l e2e=generated-name-hook -o json | jq '.items | length')" != 0 ]]; then
+if [[ "$(kubectl get -n default jobs -l e2e=generated-name-hook -o json | jq '.items | length')" != 0 ]]; then
   printf 'HookSucceeded did not clean up the first generated-name Job\n' >&2
   exit 1
 fi
@@ -338,14 +337,13 @@ previous_finished_at="$(kubectl get -n "$namespace" "application/$application" \
 kubectl patch -n "$namespace" "application/$application" --type=merge \
   -p "{\"operation\":{\"sync\":{\"revision\":\"$E2E_REVISION\"}}}" >/dev/null
 wait_for_sync_operation "$previous_finished_at"
-second_generated_job="$(kubectl get -n "$namespace" "application/$application" -o json |
-  jq -r '[.status.operationState.syncResult.resources[] | select(.kind == "Job" and .hookPhase == "Succeeded" and (.name | startswith("mcl-e2e-generated-hook-"))) | .name] | if length == 1 then .[0] else empty end')"
-if [[ -z "$second_generated_job" || "$second_generated_job" == "$first_generated_job" ]]; then
-  printf 'a repeated sync did not create a distinct generateName Hook Job\n' >&2
+second_generated_jobs="$(kubectl get -n "$namespace" "application/$application" -o json |
+  jq -c '[.status.operationState.syncResult.resources[] | select(.kind == "Job" and .hookPhase == "Succeeded" and (.name | startswith("mcl-e2e-generated-hook-"))) | .name] | sort | if length == 2 and (unique | length) == 2 then . else empty end')"
+if [[ -z "$second_generated_jobs" || "$second_generated_jobs" == "$first_generated_jobs" ]]; then
+  printf 'a repeated sync did not execute two distinct generated-name Hooks\n' >&2
   exit 1
 fi
-if kubectl get -n default job "$second_generated_job" >/dev/null 2>&1 ||
-  [[ "$(kubectl get -n default jobs -l e2e=generated-name-hook -o json | jq '.items | length')" != 0 ]]; then
+if [[ "$(kubectl get -n default jobs -l e2e=generated-name-hook -o json | jq '.items | length')" != 0 ]]; then
   printf 'HookSucceeded did not clean up the repeated generated-name Job\n' >&2
   exit 1
 fi

@@ -89,12 +89,12 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 		if err != nil {
 			return fmt.Errorf("prepare MCL %s resource identity resolver: %w", operation.name, err)
 		}
+		outputPlan := mcl.NewBundleOutputPlan(bundle)
 		for _, phase := range operation.phases {
-			artifacts, err := mcl.RenderPhaseArtifacts(bundle, phase)
+			artifacts, err := outputPlan.RenderPhaseArtifacts(phase)
 			if err != nil {
 				return fmt.Errorf("render MCL %s phase: %w", phase, err)
 			}
-			generatedOrdinals := make(map[string]int)
 			for _, artifact := range artifacts {
 				if strings.Contains(phase, "rollback") {
 					return fmt.Errorf("MCL lifecycle event %q has no Argo CD equivalent", phase)
@@ -111,10 +111,11 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 					return err
 				}
 				if resourceID.generatedName {
-					ordinalKey := resourceID.key + "\x00" + artifact.Lifecycle.Origin
-					ordinal := generatedOrdinals[ordinalKey]
-					generatedOrdinals[ordinalKey] = ordinal + 1
-					resourceID.key += "\x00generated\x00" + artifact.Lifecycle.Origin + "\x00" + strconv.Itoa(ordinal)
+					if artifact.ArtifactID != "" {
+						resourceID.key += "\x00generated\x00" + artifact.ArtifactID
+					} else {
+						resourceID.key += "\x00generated\x00" + operation.name + "\x00artifact-index\x00" + strconv.Itoa(artifact.BundleIndex)
+					}
 				}
 				applyDestinationNamespace(object, resourceID.scope, resourceID.namespace)
 				identity := resourceID.key

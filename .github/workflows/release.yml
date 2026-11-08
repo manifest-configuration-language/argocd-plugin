@@ -1,14 +1,26 @@
 name: Release
-run-name: Release ${{ inputs.version }}
+run-name: Release next ${{ inputs.bump }} (${{ inputs.channel }})
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: Release version tag
+      bump:
+        description: "バージョンの上げ幅"
         required: true
-        default: v0.1.0
-        type: string
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      channel:
+        description: "公開チャネル"
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - rc
 
 permissions:
   contents: read
@@ -24,6 +36,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       release_tag: ${{ steps.target.outputs.release_tag }}
+      version: ${{ steps.target.outputs.version }}
     permissions:
       actions: read
       checks: read
@@ -35,12 +48,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate release request
-        id: target
+      - name: Validate release branch
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
@@ -56,27 +67,6 @@ jobs:
               "$GITHUB_SHA" "$DEFAULT_BRANCH" "$default_branch_sha" >&2
             exit 1
           fi
-          if [[ ! "$RELEASE_VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            printf 'Release version must use stable vX.Y.Z format: %s\n' \
-              "$RELEASE_VERSION" >&2
-            exit 1
-          fi
-          if git show-ref --verify --quiet "refs/tags/$RELEASE_VERSION"; then
-            printf 'Tag %s already exists; refusing to reuse it.\n' \
-              "$RELEASE_VERSION" >&2
-            exit 1
-          fi
-          latest="$(git tag --list 'v*' |
-            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
-            sort -V | tail -n 1 || true)"
-          if [[ -n "$latest" ]] && \
-             [[ "$(printf '%s\n%s\n' "$latest" "$RELEASE_VERSION" |
-               sort -V | tail -n 1)" != "$RELEASE_VERSION" ]]; then
-            printf 'Release version %s must be newer than the latest release %s.\n' \
-              "$RELEASE_VERSION" "$latest" >&2
-            exit 1
-          fi
-          echo "release_tag=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Wait for CI and Argo CD integration checks
         env:
@@ -109,16 +99,70 @@ jobs:
             gh run watch "$run_id" --exit-status --compact
           done
 
+      - name: Determine release version
+        id: target
+        env:
+          BUMP: ${{ inputs.bump }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          latest="$(git tag --list 'v*' |
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
+            sort -V | tail -n 1 || true)"
+          if [[ -z "$latest" ]]; then
+            printf 'A stable vX.Y.Z tag is required to determine the next version.\n' >&2
+            exit 1
+          fi
+
+          case "$CHANNEL" in
+            stable) pattern='^v[0-9]+\.[0-9]+\.[0-9]+$' ;;
+            rc) pattern='^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' ;;
+            *) printf 'Invalid release channel: %s\n' "$CHANNEL" >&2; exit 1 ;;
+          esac
+          previous="$(git tag --points-at "$GITHUB_SHA" --list 'v*' |
+            grep -E "$pattern" | sort -V | tail -n 1 || true)"
+          if [[ -n "$previous" ]]; then
+            printf 'Commit %s already has tag %s; resuming publication.\n' \
+              "$GITHUB_SHA" "$previous" >&2
+            echo "version=${previous#v}" >> "$GITHUB_OUTPUT"
+            echo "release_tag=$previous" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$(git rev-list -n 1 "$latest")" != "$GITHUB_SHA" ]] && \
+             git merge-base --is-ancestor "$GITHUB_SHA" "$latest"; then
+            printf 'Refusing to release commit %s because it is older than %s.\n' \
+              "$GITHUB_SHA" "$latest" >&2
+            exit 1
+          fi
+
+          IFS=. read -r major minor patch <<< "${latest#v}"
+          case "$BUMP" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+            *) printf 'Invalid version bump: %s\n' "$BUMP" >&2; exit 1 ;;
+          esac
+          version="${major}.${minor}.${patch}"
+          if [[ "$CHANNEL" == rc ]]; then
+            previous="$(git tag --list "v${version}-rc.*" | sort -V | tail -n 1)"
+            number=1
+            if [[ -n "$previous" ]]; then
+              number=$((${previous##*.} + 1))
+            fi
+            version="${version}-rc.${number}"
+          fi
+          release_tag="v${version}"
+          if git show-ref --verify --quiet "refs/tags/$release_tag"; then
+            printf 'Tag %s already exists; refusing to reissue the version.\n' \
+              "$release_tag" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+
   publish:
     needs: prepare
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - mcl-version: ''
-            legacy-sdk: 'false'
-          - mcl-version: compat/mcl-v0.4.7/go.mod
-            legacy-sdk: 'true'
     permissions:
       contents: read
       packages: write
@@ -135,18 +179,6 @@ jobs:
           install: true
           install_args: go
           cache: false
-      - id: sdk
-        env:
-          SDK_VERSION_FILE: ${{ matrix.mcl-version }}
-        run: |
-          if [ -z "$SDK_VERSION_FILE" ]; then
-            echo "version=" >> "$GITHUB_OUTPUT"
-            echo "tag_suffix=" >> "$GITHUB_OUTPUT"
-          else
-            version=$(go list -modfile="$SDK_VERSION_FILE" -m -f '{{.Version}}' github.com/manifest-configuration-language/mcl)
-            echo "version=$version" >> "$GITHUB_OUTPUT"
-            echo "tag_suffix=-mcl-$version" >> "$GITHUB_OUTPUT"
-          fi
       - uses: docker/setup-buildx-action@v3.12.0
       - uses: docker/login-action@v3.7.0
         with:
@@ -158,8 +190,8 @@ jobs:
         with:
           images: ghcr.io/manifest-configuration-language/argocd-plugin
           tags: |
-            type=raw,value=${{ needs.prepare.outputs.release_tag }}${{ steps.sdk.outputs.tag_suffix }}
-            type=sha,suffix=${{ steps.sdk.outputs.tag_suffix }}
+            type=raw,value=${{ needs.prepare.outputs.release_tag }}
+            type=sha
       - uses: docker/build-push-action@v6.19.2
         id: build
         with:
@@ -168,10 +200,6 @@ jobs:
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
-          build-args: |
-            MCL_SDK_VERSION=${{ steps.sdk.outputs.version }}
-            MCL_PLUGIN_VERSION=${{ steps.sdk.outputs.version }}
-            MCL_LEGACY_SDK=${{ matrix.legacy-sdk }}
           sbom: true
           provenance: mode=max
       - uses: sigstore/cosign-installer@v3.9.1
@@ -198,4 +226,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
-        run: gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --generate-notes
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+        run: |
+          args=("$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$RELEASE_VERSION" --generate-notes)
+          if [[ "$RELEASE_CHANNEL" == rc ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${args[@]}"
