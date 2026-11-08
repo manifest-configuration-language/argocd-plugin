@@ -25,13 +25,27 @@ jobs:
           install: true
           install_args: go golangci-lint
           cache: true
+      - name: Get Go cache paths
+        id: go-cache-paths
+        run: |
+          {
+            echo "build=$(go env GOCACHE)"
+            echo "modules=$(go env GOMODCACHE)"
+            echo "version=$(go env GOVERSION)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Cache Go build and module data
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ${{ steps.go-cache-paths.outputs.build }}
+            ${{ steps.go-cache-paths.outputs.modules }}
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-cache-paths.outputs.version }}-${{ hashFiles('go.mod', 'go.sum', '**/*.go') }}
+          restore-keys: |
+            go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-cache-paths.outputs.version }}-
       - parallel:
           - name: Go tests
             timeout-minutes: 20
             run: go test ./...
-          - name: Go vet
-            timeout-minutes: 20
-            run: go vet ./...
           - name: golangci-lint
             timeout-minutes: 20
             run: golangci-lint run ./...
