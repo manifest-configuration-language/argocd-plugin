@@ -1,0 +1,12 @@
+param name: String
+param message: String
+
+let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: name
+  data:
+    message: message
+
+emit resource

@@ -41,6 +41,7 @@ const (
 	appName                = "mcl-plugin-e2e"
 	apiVersionField        = "apiVersion"
 	metadataField          = "metadata"
+	stringType             = "string"
 	gitAuthAdminToken      = "e2e-admin-token" // #nosec G101 -- This token only protects the disposable CI fixture.
 	gitAuthApplicationUser = "application"
 	gitAuthApplicationPass = "e2e-application-password" // #nosec G101 -- This password only protects the disposable CI fixture.
@@ -112,6 +113,7 @@ func TestArgoIntegration(t *testing.T) {
 	t.Run("delete-hooks", s.deleteHooks)
 	t.Run("generated-name-hooks", s.generatedHooks)
 	t.Run("failure-hook", s.failureHook)
+	t.Run("parameters", s.parameters)
 	t.Run("git-authentication", s.gitAuthentication)
 }
 
@@ -203,6 +205,12 @@ func (s *suite) cleanup() {
 func (s *suite) create(t *testing.T, path string, auto, finalizer bool, other ...string) *suite {
 	t.Helper()
 
+	return s.createWithPluginParameters(t, path, auto, finalizer, nil, other...)
+}
+
+func (s *suite) createWithPluginParameters(t *testing.T, path string, auto, finalizer bool, pluginParameters []any, other ...string) *suite {
+	t.Helper()
+
 	x := *s
 	x.t = t
 	source := func(p string, plugin bool) map[string]any {
@@ -212,7 +220,11 @@ func (s *suite) create(t *testing.T, path string, auto, finalizer bool, other ..
 		}
 		m := map[string]any{"repoURL": repoURL, "targetRevision": s.revision, "path": p}
 		if plugin {
-			m["plugin"] = map[string]any{"name": "mcl"}
+			plugin := map[string]any{"name": "mcl"}
+			if pluginParameters != nil {
+				plugin["parameters"] = pluginParameters
+			}
+			m["plugin"] = plugin
 		}
 
 		return m
@@ -452,6 +464,25 @@ func (s *suite) failureHook(t *testing.T) {
 	x := s.create(t, "examples/e2e/failure-hook", false, true)
 	x.sync("", "", "Failed")
 	x.exists(jobs, "default", "mcl-failure-hook", false)
+}
+
+func (s *suite) parameters(t *testing.T) {
+	t.Cleanup(func() { s.delete(configmaps, "default", "mcl-e2e-parameters") })
+	pluginParameters := []any{
+		map[string]any{
+			"name":     "parameters",
+			stringType: `{"name":"mcl-e2e-parameters"}`,
+		},
+		map[string]any{
+			"name":  "parameter-files",
+			"array": []any{"parameters.json"},
+		},
+	}
+	x := s.createWithPluginParameters(t, "examples/e2e/parameters", false, true, pluginParameters)
+	x.sync("", "", "Succeeded")
+	x.field(configmaps, "default", "mcl-e2e-parameters", "from parameter file", "data", "message")
+	x.cleanup()
+	x.exists(configmaps, "default", "mcl-e2e-parameters", false)
 }
 
 func (s *suite) gitAuthentication(t *testing.T) {
@@ -695,12 +726,12 @@ func createGitTestCRD(t *testing.T, s *suite) {
 				"schema": map[string]any{"openAPIV3Schema": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						apiVersionField: map[string]any{"type": "string"},
-						"kind":          map[string]any{"type": "string"},
+						apiVersionField: map[string]any{"type": stringType},
+						"kind":          map[string]any{"type": stringType},
 						metadataField:   map[string]any{"type": "object"},
 						"spec": map[string]any{
 							"type":       "object",
-							"properties": map[string]any{"value": map[string]any{"type": "string"}},
+							"properties": map[string]any{"value": map[string]any{"type": stringType}},
 						},
 					},
 				}},
