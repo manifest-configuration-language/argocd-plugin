@@ -52,7 +52,7 @@ jobs:
           kubectl wait -n argocd --for=condition=Available deployment/argocd-repo-server --timeout=5m
           patch_file="$(mktemp)"
           trap 'rm -f "$patch_file"' EXIT
-          sed "s#ghcr.io/manifest-configuration-language/argocd-plugin:v0.1.0#$MCL_PLUGIN_IMAGE#" \
+          sed "s#ghcr.io/manifest-configuration-language/argocd-plugin:v0.1.1#$MCL_PLUGIN_IMAGE#" \
             examples/install/kustomize/argocd-repo-server-patch.yaml > "$patch_file"
           kubectl patch -n argocd deployment/argocd-repo-server \
             --type=strategic --patch-file "$patch_file"

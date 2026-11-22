@@ -14,7 +14,7 @@ repoServer:
         sizeLimit: 4Gi
   extraContainers:
     - name: mcl
-      image: ghcr.io/manifest-configuration-language/argocd-plugin:v0.1.0
+      image: ghcr.io/manifest-configuration-language/argocd-plugin:v0.1.1
       imagePullPolicy: IfNotPresent
       securityContext:
         runAsNonRoot: true
