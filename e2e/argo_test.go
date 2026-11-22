@@ -490,7 +490,7 @@ func (s *suite) gitAuthentication(t *testing.T) {
 	})
 	private := t.TempDir()
 	privateRevision := initializeGitTestRepository(t, private, privateURL, gitAuthPrivateUser, gitAuthPrivatePass, map[string]string{
-		"schemas/widget.yaml": widgetCRDSchema,
+		"schemas/widget.yaml": strings.Replace(widgetCRDSchema, "value:\n", "value:\n                    description: private fixture\n", 1),
 	})
 	writeGitProject(t, application, "success", applicationURL, applicationRevision, gitAuthApplicationUser, gitAuthApplicationPass, widgetManifest("mcl-git-auth-success"))
 	writeGitProject(t, application, "denied", privateURL, privateRevision, gitAuthPrivateUser, gitAuthPrivatePass, widgetManifest("mcl-git-auth-denied"))
