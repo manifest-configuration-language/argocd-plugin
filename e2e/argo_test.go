@@ -37,6 +37,7 @@ type suite struct {
 	t              *testing.T
 	client         dynamic.Interface
 	repo, revision string
+	syncSequence   uint
 }
 
 // Fixture resources have fixed names, so these scenarios must run sequentially.
@@ -49,6 +50,9 @@ func TestArgoIntegration(t *testing.T) {
 	repo, rev := os.Getenv("E2E_REPOSITORY"), os.Getenv("E2E_REVISION")
 	if repo == "" || rev == "" {
 		t.Fatal("E2E_REPOSITORY and E2E_REVISION are required")
+	}
+	if len(rev) != 40 && len(rev) != 64 {
+		t.Fatal("E2E_REVISION must be a full Git object ID")
 	}
 	loading := clientcmd.NewDefaultClientConfigLoadingRules()
 	raw, err := loading.Load()
@@ -85,7 +89,7 @@ func TestArgoIntegration(t *testing.T) {
 	if _, ok := nodes.Items[0].GetLabels()["node-role.kubernetes.io/control-plane"]; !ok {
 		t.Fatal("refusing cluster without the dedicated Kind control-plane node")
 	}
-	s := &suite{t, c, repo, rev}
+	s := &suite{t: t, client: c, repo: repo, revision: rev}
 	t.Run("bootstrap", s.bootstrap)
 	t.Run("multi-source", s.multiSource)
 	t.Run("update-prune", s.updatePrune)
@@ -109,9 +113,13 @@ func (s *suite) get(g schema.GroupVersionResource, ns, name string) (*unstructur
 }
 
 func (s *suite) poll(label string, f func() (bool, error)) {
+	s.pollContext(s.t.Context(), label, f)
+}
+
+func (s *suite) pollContext(ctx context.Context, label string, f func() (bool, error)) {
 	s.t.Helper()
 	var last error
-	err := wait.PollUntilContextTimeout(s.t.Context(), 2*time.Second, 5*time.Minute, true, func(context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 5*time.Minute, true, func(context.Context) (bool, error) {
 		ok, e := f()
 		if e != nil {
 			last = e
@@ -151,16 +159,29 @@ func (s *suite) field(g schema.GroupVersionResource, ns, name, value string, pat
 }
 
 func (s *suite) delete(g schema.GroupVersionResource, ns, name string) {
+	s.deleteContext(s.t.Context(), g, ns, name)
+}
+
+func (s *suite) deleteContext(ctx context.Context, g schema.GroupVersionResource, ns, name string) {
 	s.t.Helper()
-	err := s.resource(g, ns).Delete(s.t.Context(), name, metav1.DeleteOptions{})
+	err := s.resource(g, ns).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		s.t.Errorf("delete %s %s: %v", g.Resource, name, err)
 	}
 }
 
 func (s *suite) cleanup() {
-	s.delete(apps, "argocd", appName)
-	s.exists(apps, "argocd", appName, false)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.t.Context()), 5*time.Minute)
+	defer cancel()
+	s.deleteContext(ctx, apps, "argocd", appName)
+	s.pollContext(ctx, "applications "+appName+" exists=false", func() (bool, error) {
+		_, err := s.resource(apps, "argocd").Get(ctx, appName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+
+		return false, err
+	})
 }
 
 func (s *suite) create(t *testing.T, path string, auto, finalizer bool, other ...string) *suite {
@@ -207,8 +228,11 @@ func (s *suite) patch(payload string) {
 
 func (s *suite) sync(path, resources, phase string) *unstructured.Unstructured {
 	s.t.Helper()
-	old, _ := s.get(apps, "argocd", appName)
-	previous, _, _ := unstructured.NestedString(old.Object, "status", "operationState", "finishedAt")
+	revision := s.revision
+	if s.syncSequence%2 == 0 {
+		revision = revision[:7]
+	}
+	s.syncSequence++
 	extra := ""
 	if path != "" {
 		extra = fmt.Sprintf(`"spec":{"source":{"path":%q}},`, path)
@@ -216,7 +240,7 @@ func (s *suite) sync(path, resources, phase string) *unstructured.Unstructured {
 	if resources != "" {
 		resources = `,"resources":` + resources
 	}
-	s.patch(fmt.Sprintf(`{%s"operation":{"sync":{"revision":%q%s}}}`, extra, s.revision, resources))
+	s.patch(fmt.Sprintf(`{%s"operation":{"sync":{"revision":%q%s}}}`, extra, revision, resources))
 	var result *unstructured.Unstructured
 	s.poll("sync operation "+phase, func() (bool, error) {
 		o, e := s.get(apps, "argocd", appName)
@@ -225,7 +249,8 @@ func (s *suite) sync(path, resources, phase string) *unstructured.Unstructured {
 		}
 		finished, _, _ := unstructured.NestedString(o.Object, "status", "operationState", "finishedAt")
 		p, _, _ := unstructured.NestedString(o.Object, "status", "operationState", "phase")
-		if finished != "" && finished != previous {
+		operationRevision, _, _ := unstructured.NestedString(o.Object, "status", "operationState", "operation", "sync", "revision")
+		if finished != "" && operationRevision == revision {
 			if p != phase {
 				return false, fmt.Errorf("unexpected phase %s: %v", p, o.Object["status"])
 			}
