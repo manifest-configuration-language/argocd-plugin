@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/manifest-configuration-language/mcl/pkg/mcl"
 	"gopkg.in/yaml.v3"
 )
 
@@ -378,12 +379,15 @@ emit resource
 	if err := os.Symlink("params-data.json", filepath.Join(root, "apps/worker/params.json")); err != nil {
 		t.Fatal(err)
 	}
+	if err := mcl.UpdateFileWithParametersAndOptionsContext(t.Context(), filepath.Join(root, "apps/worker/main.mcl"), nil, mcl.EvaluationOptions{}); err != nil {
+		t.Fatalf("create MCL lockfile fixture: %v", err)
+	}
 	var output bytes.Buffer
 	parameters := `[{"name":"parameter-files","array":["params.json"]}]`
 	if err := listInputFilesFrom(t.Context(), filepath.Join(root, "apps/worker"), parameters, "apps/worker", &output); err != nil {
 		t.Fatalf("listInputFilesFrom() error = %v", err)
 	}
-	inputs := []string{"main.mcl", "params.json", "params-data.json", "../../cluster.mcl", "../../apps/worker/cluster-link.mcl", "../../mcl.toml"}
+	inputs := []string{"main.mcl", "params.json", "params-data.json", "../../cluster.mcl", "../../apps/worker/cluster-link.mcl", "../../mcl.toml", "../../mcl.lock"}
 	for _, input := range inputs {
 		if !strings.Contains(output.String(), input) {
 			t.Errorf("input list %s does not contain input %q", output.String(), input)
