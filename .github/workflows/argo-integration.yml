@@ -43,6 +43,73 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Load plugin image into kind
         run: go tool kind load docker-image "$MCL_PLUGIN_IMAGE" --name mcl-argocd-e2e
+      - name: Build and load authenticated Git fixture
+        run: |
+          set -euo pipefail
+          docker buildx build --platform linux/amd64 --target git-e2e-server \
+            --tag mcl-git-e2e-server:e2e --load .
+          go tool kind load docker-image mcl-git-e2e-server:e2e --name mcl-argocd-e2e
+          docker buildx build --platform linux/amd64 \
+            --file e2e/gitserver/cloudflared.Dockerfile \
+            --tag mcl-cloudflared:e2e --load .
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout "$RUNNER_TEMP/git-test.key" -out "$RUNNER_TEMP/git-test.crt" \
+            -subj "/CN=mcl-git-auth.argocd.svc.cluster.local" \
+            -addext "subjectAltName=DNS:mcl-git-auth.argocd.svc.cluster.local"
+          kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret tls mcl-git-auth-tls -n argocd \
+            --cert="$RUNNER_TEMP/git-test.crt" --key="$RUNNER_TEMP/git-test.key"
+          kubectl apply -n argocd -f - <<'EOF'
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: mcl-git-auth
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: mcl-git-auth
+            template:
+              metadata:
+                labels:
+                  app: mcl-git-auth
+              spec:
+                containers:
+                  - name: git
+                    image: mcl-git-e2e-server:e2e
+                    imagePullPolicy: IfNotPresent
+                    env:
+                      - name: GIT_TEST_ADMIN_TOKEN
+                        value: e2e-admin-token
+                      - name: GIT_TEST_APPLICATION_PASSWORD
+                        value: e2e-application-password
+                      - name: GIT_TEST_PRIVATE_PASSWORD
+                        value: e2e-private-password
+                    ports:
+                      - name: https
+                        containerPort: 8443
+                    volumeMounts:
+                      - name: tls
+                        mountPath: /tls
+                        readOnly: true
+                volumes:
+                  - name: tls
+                    secret:
+                      secretName: mcl-git-auth-tls
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: mcl-git-auth
+          spec:
+            selector:
+              app: mcl-git-auth
+            ports:
+              - name: https
+                port: 8443
+                targetPort: https
+          EOF
+          kubectl rollout status -n argocd deployment/mcl-git-auth --timeout=2m
       - name: Install Argo CD and the MCL plugin
         run: |
           set -euo pipefail
@@ -95,7 +162,31 @@ jobs:
       - name: Run E2E tests
         env:
           E2E_RUN: "1"
-        run: go test ./e2e -count=1 -timeout 20m -v
+        run: |
+          set -euo pipefail
+          kubectl port-forward -n argocd service/mcl-git-auth 8443:8443 > "$RUNNER_TEMP/git-port-forward.log" 2>&1 &
+          port_forward_pid=$!
+          # MCL rejects private-address dependency hosts, so route the disposable fixture through a temporary public hostname.
+          docker run --detach --rm --network host --name mcl-git-auth-tunnel \
+            mcl-cloudflared:e2e tunnel --no-autoupdate --protocol http2 \
+            --url https://127.0.0.1:8443 --no-tls-verify
+          trap 'kill "$port_forward_pid" 2>/dev/null || true; docker stop mcl-git-auth-tunnel >/dev/null 2>&1 || true' EXIT
+          attempt=0
+          auth_url=""
+          until [ -n "$auth_url" ]; do
+            auth_url="$(docker logs mcl-git-auth-tunnel 2>&1 | grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' | head -n 1 || true)"
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge 40 ]; then
+              cat "$RUNNER_TEMP/git-port-forward.log"
+              docker logs mcl-git-auth-tunnel
+              exit 1
+            fi
+            sleep 1
+          done
+          export E2E_GIT_AUTH_URL="$auth_url"
+          curl --retry 20 --retry-delay 1 --silent --show-error --fail \
+            "$E2E_GIT_AUTH_URL/healthz" >/dev/null
+          go test ./e2e -count=1 -timeout 20m -v
       - name: Collect cluster diagnostics
         if: ${{ failure() }}
         run: |

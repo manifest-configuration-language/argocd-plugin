@@ -2,15 +2,20 @@ package e2e
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/manifest-configuration-language/mcl/pkg/mcl"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -31,7 +36,14 @@ var (
 	widgets     = schema.GroupVersionResource{Group: "e2e.example.com", Version: "v1", Resource: "widgets"}
 )
 
-const appName = "mcl-plugin-e2e"
+const (
+	appName                = "mcl-plugin-e2e"
+	gitAuthAdminToken      = "e2e-admin-token" // #nosec G101 -- This token only protects the disposable CI fixture.
+	gitAuthApplicationUser = "application"
+	gitAuthApplicationPass = "e2e-application-password" // #nosec G101 -- This password only protects the disposable CI fixture.
+	gitAuthPrivateUser     = "private"
+	gitAuthPrivatePass     = "e2e-private-password" // #nosec G101 -- This password only protects the disposable CI fixture.
+)
 
 type suite struct {
 	t              *testing.T
@@ -97,6 +109,7 @@ func TestArgoIntegration(t *testing.T) {
 	t.Run("delete-hooks", s.deleteHooks)
 	t.Run("generated-name-hooks", s.generatedHooks)
 	t.Run("failure-hook", s.failureHook)
+	t.Run("git-authentication", s.gitAuthentication)
 }
 
 func (s *suite) resource(g schema.GroupVersionResource, ns string) dynamic.ResourceInterface {
@@ -190,7 +203,11 @@ func (s *suite) create(t *testing.T, path string, auto, finalizer bool, other ..
 	x := *s
 	x.t = t
 	source := func(p string, plugin bool) map[string]any {
-		m := map[string]any{"repoURL": "https://github.com/" + s.repo + ".git", "targetRevision": s.revision, "path": p}
+		repoURL := s.repo
+		if !strings.Contains(repoURL, "://") {
+			repoURL = "https://github.com/" + repoURL + ".git"
+		}
+		m := map[string]any{"repoURL": repoURL, "targetRevision": s.revision, "path": p}
 		if plugin {
 			m["plugin"] = map[string]any{"name": "mcl"}
 		}
@@ -432,4 +449,260 @@ func (s *suite) failureHook(t *testing.T) {
 	x := s.create(t, "examples/e2e/failure-hook", false, true)
 	x.sync("", "", "Failed")
 	x.exists(jobs, "default", "mcl-failure-hook", false)
+}
+
+func (s *suite) gitAuthentication(t *testing.T) {
+	baseURL := os.Getenv("E2E_GIT_AUTH_URL")
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil || parsedURL.Scheme != "https" || !strings.HasSuffix(strings.ToLower(parsedURL.Hostname()), ".trycloudflare.com") || parsedURL.User != nil || parsedURL.Path != "" || parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
+		t.Fatalf("E2E_GIT_AUTH_URL must be an HTTPS Cloudflare quick-tunnel origin")
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	deadline := time.Now().Add(time.Minute)
+	for {
+		// #nosec G704 -- The URL is restricted to the public HTTPS origin created for this CI run.
+		response, err := client.Get(baseURL + "/healthz")
+		if err == nil {
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("authenticated Git test server is unavailable: %v", err)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	createGitTestRepository(t, client, baseURL, "application.git")
+	createGitTestRepository(t, client, baseURL, "private.git")
+
+	applicationURL := baseURL + "/application.git"
+	privateURL := baseURL + "/private.git"
+	application := t.TempDir()
+	applicationRevision := initializeGitTestRepository(t, application, applicationURL, gitAuthApplicationUser, gitAuthApplicationPass, map[string]string{
+		"schemas/widget.yaml": widgetCRDSchema,
+	})
+	private := t.TempDir()
+	privateRevision := initializeGitTestRepository(t, private, privateURL, gitAuthPrivateUser, gitAuthPrivatePass, map[string]string{
+		"schemas/widget.yaml": widgetCRDSchema,
+	})
+	writeGitProject(t, application, "success", applicationURL, applicationRevision, gitAuthApplicationUser, gitAuthApplicationPass, widgetManifest("mcl-git-auth-success"))
+	writeGitProject(t, application, "denied", privateURL, privateRevision, gitAuthPrivateUser, gitAuthPrivatePass, widgetManifest("mcl-git-auth-denied"))
+	applicationHead := runGit(t, application, gitAuthApplicationUser, gitAuthApplicationPass, "rev-parse", "HEAD")
+	runGit(t, application, gitAuthApplicationUser, gitAuthApplicationPass, "push", "origin", "HEAD:main")
+
+	if err := createGitRepositorySecret(t, s.client, applicationURL); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := s.resource(apps, "argocd").Delete(context.WithoutCancel(t.Context()), appName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			t.Errorf("delete authenticated Git Application: %v", err)
+		}
+		if err := s.resource(schema.GroupVersionResource{Version: "v1", Resource: "secrets"}, "argocd").Delete(context.WithoutCancel(t.Context()), "mcl-git-auth-e2e", metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			t.Errorf("delete authenticated Git repository Secret: %v", err)
+		}
+	})
+
+	authenticated := *s
+	authenticated.repo = applicationURL
+	authenticated.revision = applicationHead
+	success := authenticated.create(t, "success", false, true)
+	success.sync("", "", "Succeeded")
+	success.exists(configmaps, "default", "mcl-git-auth-success", true)
+	t.Cleanup(func() { s.delete(configmaps, "default", "mcl-git-auth-success") })
+	success.cleanup()
+
+	denied := authenticated.create(t, "denied", false, true)
+	result := denied.sync("", "", "Failed")
+	messages := []string{}
+	if message, _, _ := unstructured.NestedString(result.Object, "status", "operationState", "message"); message != "" {
+		messages = append(messages, message)
+	}
+	conditions, _, _ := unstructured.NestedSlice(result.Object, "status", "conditions")
+	for _, rawCondition := range conditions {
+		condition, ok := rawCondition.(map[string]any)
+		if !ok {
+			continue
+		}
+		if message, ok := condition["message"].(string); ok {
+			messages = append(messages, message)
+		}
+	}
+	message := strings.Join(messages, "\n")
+	if !strings.Contains(message, "401") && !strings.Contains(strings.ToLower(message), "authentication") {
+		t.Fatalf("different-repository Git dependency failed for an unexpected reason: %s", message)
+	}
+}
+
+const widgetCRDSchema = `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.auth.example.com
+spec:
+  group: auth.example.com
+  names:
+    kind: Widget
+    plural: widgets
+    singular: widget
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                value:
+                  type: string
+`
+
+func createGitTestRepository(t *testing.T, client *http.Client, baseURL, name string) {
+	t.Helper()
+	path := ""
+	switch name {
+	case "application.git":
+		path = "application.git"
+	case "private.git":
+		path = "private.git"
+	default:
+		t.Fatalf("unsupported Git test repository %q", name)
+	}
+	// #nosec G704 -- The URL is restricted to the public HTTPS origin created for this CI run.
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+"/admin/repositories/"+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+gitAuthAdminToken)
+	// #nosec G704 -- The request targets the validated public HTTPS CI fixture origin.
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("create Git test repository: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("create Git test repository returned %s", response.Status)
+	}
+}
+
+func initializeGitTestRepository(t *testing.T, directory, remote, username, password string, files map[string]string) string {
+	t.Helper()
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, directory, username, password, "init", "--initial-branch=main")
+	runGit(t, directory, username, password, "config", "user.name", "MCL E2E")
+	runGit(t, directory, username, password, "config", "user.email", "mcl-e2e@example.invalid")
+	for name, content := range files {
+		path := filepath.Join(directory, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, directory, username, password, "add", ".")
+	runGit(t, directory, username, password, "commit", "-m", "initial repository content")
+	revision := runGit(t, directory, username, password, "rev-parse", "HEAD")
+	runGit(t, directory, username, password, "remote", "add", "origin", remote)
+	runGit(t, directory, username, password, "push", "origin", "HEAD:main")
+
+	return revision
+}
+
+func writeGitProject(t *testing.T, repository, directory, source, revision, username, password, manifest string) {
+	t.Helper()
+	if !filepath.IsLocal(directory) || directory == "." {
+		t.Fatalf("Git project path %q must be local", directory)
+	}
+	project := filepath.Join(repository, directory)
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "main.mcl"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := fmt.Sprintf("[[crd_schemas]]\nsource = %q\nrevision = %q\ndirectory = \"schemas\"\nfiles = [\"widget.yaml\"]\n", "git+"+source, revision)
+	// #nosec G703 -- directory is constrained to a local path before constructing the fixture path.
+	if err := os.WriteFile(filepath.Join(project, "mcl.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	options := mcl.EvaluationOptions{
+		GitCredentialProvider: func(_ context.Context, _ string) (mcl.GitCredentials, error) {
+			return mcl.GitCredentials{Username: username, Password: password}, nil
+		},
+	}
+	if err := mcl.UpdateFileWithParametersAndOptionsContext(t.Context(), filepath.Join(project, "main.mcl"), nil, options); err != nil {
+		t.Fatalf("create locked Git dependency for %s: %v", directory, err)
+	}
+	runGit(t, repository, gitAuthApplicationUser, gitAuthApplicationPass, "add", ".")
+	runGit(t, repository, gitAuthApplicationUser, gitAuthApplicationPass, "commit", "-m", "add "+directory+" project")
+}
+
+func widgetManifest(name string) string {
+	return fmt.Sprintf(`let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: %q
+  data:
+    value: "authenticated"
+emit resource
+`, name)
+}
+
+func runGit(t *testing.T, directory, username, password string, args ...string) string {
+	t.Helper()
+	credentials := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+	// #nosec G702 -- Git receives argument-vector values directly and never invokes a shell.
+	command := exec.CommandContext(t.Context(), "git", args...)
+	command.Dir = directory
+	command.Env = append(os.Environ(),
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.extraHeader",
+		"GIT_CONFIG_VALUE_0=Authorization: Basic "+credentials,
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+	}
+
+	return strings.TrimSpace(string(output))
+}
+
+func createGitRepositorySecret(t *testing.T, client dynamic.Interface, repoURL string) error {
+	t.Helper()
+	encoded := func(value string) string { return base64.StdEncoding.EncodeToString([]byte(value)) }
+	secret := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]any{
+			"name":      "mcl-git-auth-e2e",
+			"namespace": "argocd",
+			"labels":    map[string]any{"argocd.argoproj.io/secret-type": "repository"},
+		},
+		"type": "Opaque",
+		"data": map[string]any{
+			"url":      encoded(repoURL),
+			"username": encoded(gitAuthApplicationUser),
+			"password": encoded(gitAuthApplicationPass),
+			"type":     encoded("git"),
+			"name":     encoded("mcl-git-auth-e2e"),
+		},
+	}}
+	_, err := client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "secrets"}).Namespace("argocd").Create(t.Context(), secret, metav1.CreateOptions{})
+
+	return err
 }
