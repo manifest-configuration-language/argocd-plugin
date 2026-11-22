@@ -56,6 +56,41 @@ jobs:
             examples/install/kustomize/argocd-repo-server-patch.yaml > "$patch_file"
           kubectl patch -n argocd deployment/argocd-repo-server \
             --type=strategic --patch-file "$patch_file"
+          sed 's/provideGitCreds: false/provideGitCreds: true/' plugin/plugin.yaml > plugin-e2e.yaml
+          kubectl create configmap mcl-plugin-config -n argocd \
+            --from-file=plugin.yaml=plugin-e2e.yaml
+          kubectl patch -n argocd deployment/argocd-repo-server --type=strategic --patch '
+          spec:
+            template:
+              spec:
+                securityContext:
+                  fsGroup: 999
+                volumes:
+                  - name: mcl-plugin-config
+                    configMap:
+                      name: mcl-plugin-config
+                  - name: mcl-askpass
+                    emptyDir: {}
+                containers:
+                  - name: argocd-repo-server
+                    env:
+                      - name: ARGOCD_ASK_PASS_SOCK
+                        value: /var/run/mcl-askpass/argocd-git-ask-pass.sock
+                    volumeMounts:
+                      - name: mcl-askpass
+                        mountPath: /var/run/mcl-askpass
+                  - name: mcl
+                    env:
+                      - name: ARGOCD_ASK_PASS_SOCK
+                        value: /var/run/mcl-askpass/argocd-git-ask-pass.sock
+                    volumeMounts:
+                      - name: mcl-plugin-config
+                        mountPath: /home/argocd/cmp-server/config/plugin.yaml
+                        subPath: plugin.yaml
+                        readOnly: true
+                      - name: mcl-askpass
+                        mountPath: /var/run/mcl-askpass
+          '
           kubectl rollout status -n argocd deployment/argocd-repo-server --timeout=5m
       - name: Run E2E tests
         env:
