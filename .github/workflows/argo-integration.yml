@@ -184,7 +184,7 @@ jobs:
             sleep 1
           done
           export E2E_GIT_AUTH_URL="$auth_url"
-          curl --retry 20 --retry-delay 1 --silent --show-error --fail \
+          curl --retry 60 --retry-delay 2 --retry-all-errors --silent --show-error --fail \
             "$E2E_GIT_AUTH_URL/healthz" >/dev/null
           go test ./e2e -count=1 -timeout 20m -v
       - name: Collect cluster diagnostics
