@@ -1,0 +1,11 @@
+import "./config.mcl" as config
+
+let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: config.name
+  data:
+    value: config.value
+
+emit resource

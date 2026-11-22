@@ -18,6 +18,8 @@ Parameter Announcementの既定値はArgo CDから実行時パラメータとし
 
 `mcl-argocd inputs`はMCL評価で読み込んだファイルと`parameter-files`をセミコロン区切りで出力します。このコマンドはUI Parameter Announcementではありません。出力は`argocd.argoproj.io/manifest-generate-paths`へ設定できます。Argo CDは相対パスをApplicationのsource pathから解決します。
 
+Argo CDのAnnotationは`;`を区切り文字に使うため、入力ファイルのpathに`;`が含まれる場合、`mcl-argocd inputs`は曖昧なpath一覧を出力せずエラーになります。その場合はファイル名を変更してください。
+
 Argo CDのrepo-serverがCMPへ送るファイルをこのAnnotationで絞るには、先に`reposerver.plugin.use.manifest.generate.paths`を有効にします。ApplicationごとのAnnotationがない場合や入力パスが不足している場合、必要なファイルがCMPへ届かず、Manifest生成に失敗することがあります。
 
 ```yaml

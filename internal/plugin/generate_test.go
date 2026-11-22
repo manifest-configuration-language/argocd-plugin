@@ -387,6 +387,56 @@ emit resource
 	}
 }
 
+func TestListInputFilesRejectsPathsContainingSeparator(t *testing.T) {
+	t.Parallel()
+
+	t.Run("MCL input", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeProjectFile(t, root, "main.mcl", `import "./module;data.mcl" as data
+let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: data.name
+emit resource
+`)
+		writeProjectFile(t, root, "module;data.mcl", `export let name = "worker"
+`)
+		assertInputPathSeparatorRejected(t, root, "[]")
+	})
+
+	t.Run("parameter file", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeProjectFile(t, root, "main.mcl", `let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "worker"
+emit resource
+`)
+		writeProjectFile(t, root, "params;data.json", `{}
+`)
+		assertInputPathSeparatorRejected(t, root, `[{"name":"parameter-files","array":["params;data.json"]}]`)
+	})
+}
+
+func assertInputPathSeparatorRejected(t *testing.T, root, parameters string) {
+	t.Helper()
+
+	var output bytes.Buffer
+	err := listInputFilesFrom(t.Context(), root, parameters, ".", &output)
+	if err == nil || !strings.Contains(err.Error(), "contains the reserved path separator") {
+		t.Fatalf("listInputFilesFrom() error = %v, want path separator diagnostic", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("listInputFilesFrom() wrote an ambiguous path list before failing: %q", output.String())
+	}
+}
+
 func TestGenerateRejectsCreateUpdateManifestDrift(t *testing.T) {
 	t.Parallel()
 

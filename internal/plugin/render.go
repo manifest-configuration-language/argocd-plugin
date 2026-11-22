@@ -247,6 +247,9 @@ func listInputFilesFrom(ctx context.Context, root, encodedParameters, sourcePath
 	inputs := make(map[string]struct{})
 	inputs["main.mcl"] = struct{}{}
 	for _, parameterFile := range options.parameterFiles {
+		if strings.Contains(parameterFile, ";") {
+			return fmt.Errorf("input path %q contains the reserved path separator ';'", parameterFile)
+		}
 		inputs[filepath.ToSlash(parameterFile)] = struct{}{}
 	}
 	for _, operation := range operationsFor(options) {
@@ -259,6 +262,9 @@ func listInputFilesFrom(ctx context.Context, root, encodedParameters, sourcePath
 			repoPath := path.Clean(path.Join(repoSourcePath, inputFromSource))
 			if repoPath == ".." || strings.HasPrefix(repoPath, "../") || path.IsAbs(repoPath) {
 				return fmt.Errorf("MCL input path %q escapes the Git repository", readFile)
+			}
+			if strings.Contains(inputFromSource, ";") {
+				return fmt.Errorf("MCL input path %q contains the reserved path separator ';'", readFile)
 			}
 			inputs[inputFromSource] = struct{}{}
 		}

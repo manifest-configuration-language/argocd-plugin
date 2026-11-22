@@ -97,6 +97,7 @@ func TestArgoIntegration(t *testing.T) {
 	t.Run("delete-hooks", s.deleteHooks)
 	t.Run("generated-name-hooks", s.generatedHooks)
 	t.Run("failure-hook", s.failureHook)
+	t.Run("manifest-generate-paths", s.manifestGeneratePaths)
 }
 
 func (s *suite) resource(g schema.GroupVersionResource, ns string) dynamic.ResourceInterface {
@@ -186,6 +187,12 @@ func (s *suite) cleanup() {
 
 func (s *suite) create(t *testing.T, path string, auto, finalizer bool, other ...string) *suite {
 	t.Helper()
+
+	return s.createWithManifestPaths(t, path, auto, finalizer, "", other...)
+}
+
+func (s *suite) createWithManifestPaths(t *testing.T, path string, auto, finalizer bool, manifestPaths string, other ...string) *suite {
+	t.Helper()
 	x := *s
 	x.t = t
 	source := func(p string, plugin bool) map[string]any {
@@ -205,7 +212,11 @@ func (s *suite) create(t *testing.T, path string, auto, finalizer bool, other ..
 	if auto {
 		spec["syncPolicy"] = map[string]any{"automated": map[string]any{"prune": true}}
 	}
-	obj := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "argoproj.io/v1alpha1", "kind": "Application", "metadata": map[string]any{"name": appName, "namespace": "argocd"}, "spec": spec}}
+	metadata := map[string]any{"name": appName, "namespace": "argocd"}
+	if manifestPaths != "" {
+		metadata["annotations"] = map[string]any{"argocd.argoproj.io/manifest-generate-paths": manifestPaths}
+	}
+	obj := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "argoproj.io/v1alpha1", "kind": "Application", "metadata": metadata, "spec": spec}}
 	if finalizer {
 		obj.SetFinalizers([]string{"resources-finalizer.argocd.argoproj.io"})
 	}
@@ -430,4 +441,16 @@ func (s *suite) failureHook(t *testing.T) {
 	x := s.create(t, "examples/e2e/failure-hook", false, true)
 	x.sync("", "", "Failed")
 	x.exists(jobs, "default", "mcl-failure-hook", false)
+}
+
+func (s *suite) manifestGeneratePaths(t *testing.T) {
+	t.Cleanup(func() { s.delete(configmaps, "default", "mcl-e2e-input-paths") })
+	x := s.createWithManifestPaths(t, "examples/e2e/input-paths", false, true, "main.mcl")
+	x.sync("", "", "Failed")
+
+	x.patch(`{"metadata":{"annotations":{"argocd.argoproj.io/manifest-generate-paths":"main.mcl;config.mcl","argocd.argoproj.io/refresh":"hard"}}}`)
+	x.sync("", "", "Succeeded")
+	x.exists(configmaps, "default", "mcl-e2e-input-paths", true)
+	x.cleanup()
+	x.exists(configmaps, "default", "mcl-e2e-input-paths", false)
 }
