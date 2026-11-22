@@ -520,22 +520,26 @@ func (s *suite) gitAuthentication(t *testing.T) {
 	success.exists(authWidgets, "default", "mcl-git-auth-success", false)
 
 	denied := authenticated.create(t, "denied", false, true)
-	result := denied.sync("", "", "Failed")
-	messages := []string{}
-	if message, _, _ := unstructured.NestedString(result.Object, "status", "operationState", "message"); message != "" {
-		messages = append(messages, message)
-	}
-	conditions, _, _ := unstructured.NestedSlice(result.Object, "status", "conditions")
-	for _, rawCondition := range conditions {
-		condition, ok := rawCondition.(map[string]any)
-		if !ok {
-			continue
+	message := ""
+	denied.poll("private Git dependency authentication failure", func() (bool, error) {
+		application, err := denied.get(apps, "argocd", appName)
+		if err != nil {
+			return false, err
 		}
-		if message, ok := condition["message"].(string); ok {
-			messages = append(messages, message)
+		conditions, _, _ := unstructured.NestedSlice(application.Object, "status", "conditions")
+		for _, rawCondition := range conditions {
+			condition, ok := rawCondition.(map[string]any)
+			if !ok {
+				continue
+			}
+			message, _ = condition["message"].(string)
+			if strings.Contains(message, "401") || strings.Contains(strings.ToLower(message), "authentication") {
+				return true, nil
+			}
 		}
-	}
-	message := strings.Join(messages, "\n")
+
+		return false, nil
+	})
 	if !strings.Contains(message, "401") && !strings.Contains(strings.ToLower(message), "authentication") {
 		t.Fatalf("different-repository Git dependency failed for an unexpected reason: %s", message)
 	}
