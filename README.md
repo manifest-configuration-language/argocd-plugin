@@ -73,9 +73,9 @@ Argo CDはSelective SyncでSync Hookを実行しません。Prune、Diff、Healt
 
 ## 入力ファイル追跡
 
-`mcl-argocd inputs`は`main.mcl`、指定した`parameter-files`、MCL評価で読み込んだファイルをセミコロン区切りで出力します。出力はApplicationのsource pathを基準にする`argocd.argoproj.io/manifest-generate-paths`の値として使えます。入力一覧はUIパラメータとしてAnnouncementしません。
+`mcl-argocd inputs`は`main.mcl`、指定した`parameter-files`、MCL評価で読み込んだファイルをセミコロン区切りで出力します。出力はApplicationのsource pathを基準にする`argocd.argoproj.io/manifest-generate-paths`の値として使えます。このAnnotationは変更された入力に応じたApplicationの再調整に使われます。入力一覧はUIパラメータとしてAnnouncementしません。
 
-この転送最適化を使う場合は、Argo CD Helm Valuesで次を有効にし、各Applicationへ`mcl-argocd inputs`の出力をAnnotationとして設定してください。
+Argo CD v3.6.1でCMPへ送るファイルの範囲を調整する場合は、Argo CD Helm Valuesで次を有効にし、各Applicationへ`mcl-argocd inputs`の出力をAnnotationとして設定してください。
 
 ```yaml
 configs:
@@ -83,7 +83,7 @@ configs:
     reposerver.plugin.use.manifest.generate.paths: "true"
 ```
 
-MCLのimportや依存を追加した場合は、入力一覧を再生成してApplicationのAnnotationを更新します。古い一覧では新しい入力がCMPへ転送されず、Manifest生成に失敗することがあります。設定例は[設定](docs/configuration.md#入力ファイル追跡)を参照してください。
+Argo CD v3.6.1はAnnotationに記載された個々のパスだけをCMPへ送らず、パスから決まる共通ディレクトリ以下を送ります。この設定はCMPへの転送量をAnnotationのファイル一覧だけに限定しません。Annotationに記載する入力が不足すると変更時にApplicationの再調整が行われず、古いManifestが残ることがあります。MCLのimportや依存を追加した場合は、入力一覧を再生成してApplicationのAnnotationを更新してください。設定例は[設定](docs/configuration.md#入力ファイル追跡)を参照してください。
 
 ## セキュリティと制約
 
