@@ -79,7 +79,10 @@ func TestArgoIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(nodes.Items) != 1 || nodes.Items[0].GetName() != "mcl-argocd-e2e-control-plane" || nodes.Items[0].GetLabels()["io.x-k8s.kind.role"] != "control-plane" {
+	if len(nodes.Items) != 1 || nodes.Items[0].GetName() != "mcl-argocd-e2e-control-plane" {
+		t.Fatal("refusing cluster without the dedicated Kind control-plane node")
+	}
+	if _, ok := nodes.Items[0].GetLabels()["node-role.kubernetes.io/control-plane"]; !ok {
 		t.Fatal("refusing cluster without the dedicated Kind control-plane node")
 	}
 	s := &suite{t, c, repo, rev}
