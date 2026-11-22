@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -384,6 +385,23 @@ emit resource
 	}
 	if !strings.Contains(output.String(), "../../cluster.mcl") {
 		t.Errorf("input list %q does not contain the monorepo import relative to the Application source", output.String())
+	}
+}
+
+func TestListInputFilesNormalizesParameterPaths(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", "let resource =\n  apiVersion: \"v1\"\n  kind: \"ConfigMap\"\n  metadata:\n    name: \"worker\"\nemit resource\n")
+	writeProjectFile(t, root, "params.json", "{}")
+	var output bytes.Buffer
+	parameters := `[{"name":"parameter-files","array":["./params.json"]}]`
+	if err := listInputFilesFrom(t.Context(), root, parameters, ".", &output); err != nil {
+		t.Fatalf("listInputFilesFrom() error = %v", err)
+	}
+	inputs := strings.Split(strings.TrimSpace(output.String()), ";")
+	if slices.Contains(inputs, "./params.json") || !slices.Contains(inputs, "params.json") {
+		t.Fatalf("input paths = %q, want canonical params.json", inputs)
 	}
 }
 

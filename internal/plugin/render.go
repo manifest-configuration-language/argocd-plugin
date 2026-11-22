@@ -250,7 +250,7 @@ func listInputFilesFrom(ctx context.Context, root, encodedParameters, sourcePath
 		if strings.Contains(parameterFile, ";") {
 			return fmt.Errorf("input path %q contains the reserved path separator ';'", parameterFile)
 		}
-		inputs[filepath.ToSlash(parameterFile)] = struct{}{}
+		inputs[filepath.ToSlash(filepath.Clean(parameterFile))] = struct{}{}
 	}
 	for _, operation := range operationsFor(options) {
 		_, readFiles, err := evaluateWithReadFiles(ctx, entry, operation.name, parameters, evaluationOptions)
