@@ -34,10 +34,13 @@ var (
 	roles       = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"}
 	crds        = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
 	widgets     = schema.GroupVersionResource{Group: "e2e.example.com", Version: "v1", Resource: "widgets"}
+	authWidgets = schema.GroupVersionResource{Group: "auth.example.com", Version: "v1", Resource: "widgets"}
 )
 
 const (
 	appName                = "mcl-plugin-e2e"
+	apiVersionField        = "apiVersion"
+	metadataField          = "metadata"
 	gitAuthAdminToken      = "e2e-admin-token" // #nosec G101 -- This token only protects the disposable CI fixture.
 	gitAuthApplicationUser = "application"
 	gitAuthApplicationPass = "e2e-application-password" // #nosec G101 -- This password only protects the disposable CI fixture.
@@ -224,7 +227,7 @@ func (s *suite) create(t *testing.T, path string, auto, finalizer bool, other ..
 		spec["syncPolicy"] = map[string]any{"automated": map[string]any{"prune": true}}
 	}
 	metadata := map[string]any{"name": appName, "namespace": "argocd"}
-	obj := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "argoproj.io/v1alpha1", "kind": "Application", "metadata": metadata, "spec": spec}}
+	obj := &unstructured.Unstructured{Object: map[string]any{apiVersionField: "argoproj.io/v1alpha1", "kind": "Application", metadataField: metadata, "spec": spec}}
 	if finalizer {
 		obj.SetFinalizers([]string{"resources-finalizer.argocd.argoproj.io"})
 	}
@@ -492,6 +495,7 @@ func (s *suite) gitAuthentication(t *testing.T) {
 	writeGitProject(t, application, "denied", privateURL, privateRevision, gitAuthPrivateUser, gitAuthPrivatePass, widgetManifest("mcl-git-auth-denied"))
 	applicationHead := runGit(t, application, gitAuthApplicationUser, gitAuthApplicationPass, "rev-parse", "HEAD")
 	runGit(t, application, gitAuthApplicationUser, gitAuthApplicationPass, "push", "origin", "HEAD:main")
+	createGitTestCRD(t, s)
 
 	if err := createGitRepositorySecret(t, s.client, applicationURL); err != nil {
 		t.Fatal(err)
@@ -510,9 +514,9 @@ func (s *suite) gitAuthentication(t *testing.T) {
 	authenticated.revision = applicationHead
 	success := authenticated.create(t, "success", false, true)
 	success.sync("", "", "Succeeded")
-	success.exists(configmaps, "default", "mcl-git-auth-success", true)
-	t.Cleanup(func() { s.delete(configmaps, "default", "mcl-git-auth-success") })
+	success.exists(authWidgets, "default", "mcl-git-auth-success", true)
 	success.cleanup()
+	success.exists(authWidgets, "default", "mcl-git-auth-success", false)
 
 	denied := authenticated.create(t, "denied", false, true)
 	result := denied.sync("", "", "Failed")
@@ -534,6 +538,7 @@ func (s *suite) gitAuthentication(t *testing.T) {
 	if !strings.Contains(message, "401") && !strings.Contains(strings.ToLower(message), "authentication") {
 		t.Fatalf("different-repository Git dependency failed for an unexpected reason: %s", message)
 	}
+	denied.exists(authWidgets, "default", "mcl-git-auth-denied", false)
 }
 
 const widgetCRDSchema = `apiVersion: apiextensions.k8s.io/v1
@@ -653,14 +658,69 @@ func writeGitProject(t *testing.T, repository, directory, source, revision, user
 
 func widgetManifest(name string) string {
 	return fmt.Sprintf(`let resource =
-  apiVersion: "v1"
-  kind: "ConfigMap"
+  apiVersion: "auth.example.com/v1"
+  kind: "Widget"
   metadata:
     name: %q
-  data:
+  spec:
     value: "authenticated"
 emit resource
 `, name)
+}
+
+func createGitTestCRD(t *testing.T, s *suite) {
+	t.Helper()
+	crd := &unstructured.Unstructured{Object: map[string]any{
+		apiVersionField: "apiextensions.k8s.io/v1",
+		"kind":          "CustomResourceDefinition",
+		metadataField:   map[string]any{"name": "widgets.auth.example.com"},
+		"spec": map[string]any{
+			"group": "auth.example.com",
+			"names": map[string]any{
+				"plural":   "widgets",
+				"singular": "widget",
+				"kind":     "Widget",
+				"listKind": "WidgetList",
+			},
+			"scope": "Namespaced",
+			"versions": []any{map[string]any{
+				"name":    "v1",
+				"served":  true,
+				"storage": true,
+				"schema": map[string]any{"openAPIV3Schema": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						apiVersionField: map[string]any{"type": "string"},
+						"kind":          map[string]any{"type": "string"},
+						metadataField:   map[string]any{"type": "object"},
+						"spec": map[string]any{
+							"type":       "object",
+							"properties": map[string]any{"value": map[string]any{"type": "string"}},
+						},
+					},
+				}},
+			}},
+		},
+	}}
+	if _, err := s.resource(crds, "").Create(t.Context(), crd, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create Git authentication test CRD: %v", err)
+	}
+	t.Cleanup(func() { s.delete(crds, "", "widgets.auth.example.com") })
+	s.poll("established Git authentication test CRD", func() (bool, error) {
+		created, err := s.get(crds, "", "widgets.auth.example.com")
+		if err != nil {
+			return false, err
+		}
+		conditions, _, _ := unstructured.NestedSlice(created.Object, "status", "conditions")
+		for _, rawCondition := range conditions {
+			condition, ok := rawCondition.(map[string]any)
+			if ok && condition["type"] == "Established" && condition["status"] == "True" {
+				return true, nil
+			}
+		}
+
+		return false, nil
+	})
 }
 
 func runGit(t *testing.T, directory, username, password string, args ...string) string {
@@ -686,9 +746,9 @@ func createGitRepositorySecret(t *testing.T, client dynamic.Interface, repoURL s
 	t.Helper()
 	encoded := func(value string) string { return base64.StdEncoding.EncodeToString([]byte(value)) }
 	secret := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Secret",
-		"metadata": map[string]any{
+		apiVersionField: "v1",
+		"kind":          "Secret",
+		metadataField: map[string]any{
 			"name":      "mcl-git-auth-e2e",
 			"namespace": "argocd",
 			"labels":    map[string]any{"argocd.argoproj.io/secret-type": "repository"},
