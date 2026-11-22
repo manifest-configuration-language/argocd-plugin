@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/manifest-configuration-language/mcl/pkg/mcl"
 )
 
 const (
@@ -97,6 +99,19 @@ func TestApplyLifecycle(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAssignLifecycleRejectsConflictingPriorityForSharedArgoHookPhase(t *testing.T) {
+	t.Parallel()
+
+	item := &renderedResource{}
+	if err := assignLifecycle(item, beforeCreate, mcl.Lifecycle{Events: []string{beforeCreate}, Priority: 1, Wait: true}); err != nil {
+		t.Fatal(err)
+	}
+	err := assignLifecycle(item, beforeUpdate, mcl.Lifecycle{Events: []string{beforeUpdate}, Priority: 2, Wait: true})
+	if err == nil || !strings.Contains(err.Error(), "conflicting sync waves") {
+		t.Fatalf("assignLifecycle() error = %v, want conflicting sync waves", err)
 	}
 }
 

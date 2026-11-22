@@ -356,11 +356,13 @@ func assignLifecycle(item *renderedResource, phase string, lifecycle mcl.Lifecyc
 		case phase == verifyPhase && event == verifyPhase:
 			hook = "PostSync"
 		}
-		if hook != "" && !slices.Contains(item.hooks, hook) {
+		if hook != "" {
 			if item.waveSet && item.wave != lifecycle.Priority {
 				return fmt.Errorf("MCL lifecycle events assign conflicting sync waves %d and %d", item.wave, lifecycle.Priority)
 			}
-			item.hooks = append(item.hooks, hook)
+			if !slices.Contains(item.hooks, hook) {
+				item.hooks = append(item.hooks, hook)
+			}
 			item.wave = lifecycle.Priority
 			item.waveSet = true
 		}
