@@ -14,7 +14,15 @@ Lifecycle付きArtifactをCreate、Update、Delete操作としてMCLにレンダ
 
 `before-next-run`、`on-success`、`on-failure`を`BeforeHookCreation`、`HookSucceeded`、`HookFailed`へ変換します。MCL Hook Priorityは`argocd.argoproj.io/sync-wave`へ設定します。HookのAnnotationに既存値がある場合、MCLが出す値と一致しなければエラーです。
 
-Hook Resourceでは`metadata.name`の代わりに`metadata.generateName`を指定できます。MCLはHook Lifecycleが付いたResourceに限って`generateName`を許可し、通常Resourceでは安定したIdentityとして`metadata.name`を要求します。Argo CDがSyncごとにJob名を生成するため、同じ`generateName` prefixのHookを繰り返し実行でき、`HookSucceeded`などのCleanup Policyで完了したJobを削除できます。
+Hook Resourceでは`metadata.name`の代わりに`metadata.generateName`を指定できます。MCLはHook Lifecycleが付いたResourceに限って`generateName`を許可し、通常Resourceでは安定したIdentityとして`metadata.name`を要求します。生成名Hookには`lifecycle.withIdentity`で論理キーを設定してください。同じArtifactにはCreateやUpdateをまたいで同じキーを指定し、別々のHookには異なるキーを指定します。キーがない場合はManifest生成に失敗します。Argo CDがSyncごとにJob名を生成するため、同じ`generateName` prefixを持つHookも独立して実行でき、`HookSucceeded`などのCleanup Policyで完了したJobを削除できます。
+
+```mcl
+let migrationHook = lifecycle.withIdentity(
+  lifecycle.attach(migrationJob, ["before.create", "before.update"], 0, true, ["on-success"]),
+  "database-migration",
+)
+emit migrationHook
+```
 
 Bootstrap PriorityはBootstrap同士の順序付けに使います。プラグインは各PriorityをArgo CD Waveへそのまま加算せず、すべての通常ResourceのWaveより前になる連続したWaveへ割り当てます。通常Resourceの最小WaveがArgo CDで扱える最小値の場合など、前のWaveを確保できない入力は明確なエラーになります。
 

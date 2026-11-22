@@ -48,6 +48,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: jdx/mise-action@v5.2.6
+        with:
+          install: true
+          install_args: go
+          cache: false
+
       - name: Validate release branch
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -104,62 +110,8 @@ jobs:
         env:
           BUMP: ${{ inputs.bump }}
           CHANNEL: ${{ inputs.channel }}
-        run: |
-          set -euo pipefail
-          latest="$(git tag --list 'v*' |
-            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
-            sort -V | tail -n 1 || true)"
-          if [[ -z "$latest" ]]; then
-            printf 'A stable vX.Y.Z tag is required to determine the next version.\n' >&2
-            exit 1
-          fi
-
-          case "$CHANNEL" in
-            stable) pattern='^v[0-9]+\.[0-9]+\.[0-9]+$' ;;
-            rc) pattern='^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' ;;
-            *) printf 'Invalid release channel: %s\n' "$CHANNEL" >&2; exit 1 ;;
-          esac
-          previous="$(git tag --points-at "$GITHUB_SHA" --list 'v*' |
-            grep -E "$pattern" | sort -V | tail -n 1 || true)"
-          if [[ -n "$previous" ]]; then
-            printf 'Commit %s already has tag %s; resuming publication.\n' \
-              "$GITHUB_SHA" "$previous" >&2
-            echo "version=${previous#v}" >> "$GITHUB_OUTPUT"
-            echo "release_tag=$previous" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [[ "$(git rev-list -n 1 "$latest")" != "$GITHUB_SHA" ]] && \
-             git merge-base --is-ancestor "$GITHUB_SHA" "$latest"; then
-            printf 'Refusing to release commit %s because it is older than %s.\n' \
-              "$GITHUB_SHA" "$latest" >&2
-            exit 1
-          fi
-
-          IFS=. read -r major minor patch <<< "${latest#v}"
-          case "$BUMP" in
-            major) major=$((major + 1)); minor=0; patch=0 ;;
-            minor) minor=$((minor + 1)); patch=0 ;;
-            patch) patch=$((patch + 1)) ;;
-            *) printf 'Invalid version bump: %s\n' "$BUMP" >&2; exit 1 ;;
-          esac
-          version="${major}.${minor}.${patch}"
-          if [[ "$CHANNEL" == rc ]]; then
-            previous="$(git tag --list "v${version}-rc.*" | sort -V | tail -n 1)"
-            number=1
-            if [[ -n "$previous" ]]; then
-              number=$((${previous##*.} + 1))
-            fi
-            version="${version}-rc.${number}"
-          fi
-          release_tag="v${version}"
-          if git show-ref --verify --quiet "refs/tags/$release_tag"; then
-            printf 'Tag %s already exists; refusing to reissue the version.\n' \
-              "$release_tag" >&2
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          GITHUB_SHA: ${{ github.sha }}
+        run: go run ./cmd/release-version
 
   publish:
     needs: prepare
@@ -229,6 +181,20 @@ jobs:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
         run: |
+          if existing_release=$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease' 2>/dev/null); then
+            expected_prerelease=false
+            if [[ "$RELEASE_CHANNEL" == rc ]]; then
+              expected_prerelease=true
+            fi
+            if [[ "$existing_release" != "$expected_prerelease" ]]; then
+              printf 'Release %s already exists with prerelease=%s, expected %s.\n' \
+                "$RELEASE_TAG" "$existing_release" "$expected_prerelease" >&2
+              exit 1
+            fi
+            printf 'Release %s already exists; skipping duplicate creation.\n' "$RELEASE_TAG"
+            exit 0
+          fi
           args=("$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "$RELEASE_VERSION" --generate-notes)
           if [[ "$RELEASE_CHANNEL" == rc ]]; then

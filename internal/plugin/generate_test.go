@@ -63,7 +63,7 @@ func TestGenerateRendersGeneratedNameHook(t *testing.T) {
           - name: "migration"
             image: "busybox:1.37.0"
             command: ["sh", "-c", "echo migration"]
-let hook = lifecycle.attach(hookResource, ["before.create", "before.update"], 0, true, ["on-success"])
+let hook = lifecycle.withIdentity(lifecycle.attach(hookResource, ["before.create", "before.update"], 0, true, ["on-success"]), "migration-hook")
 emit hook
 `)
 	var output bytes.Buffer
@@ -80,6 +80,24 @@ emit hook
 	}
 	if got := strings.Count(output.String(), "generateName: migration-"); got != 1 {
 		t.Fatalf("the same generated-name Artifact from Create and Update rendered %d times, want one merged Hook:\n%s", got, output.String())
+	}
+}
+
+func TestGenerateRejectsGeneratedNameHookWithoutCrossOperationIdentity(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", `let hookResource =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    generateName: "migration-"
+let hook = lifecycle.attach(hookResource, ["before.create", "before.update"], 0, true, [])
+emit hook
+`)
+	err := generateFrom(t.Context(), root, "[]", &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "requires lifecycle.withIdentity") {
+		t.Fatalf("generateFrom() error = %v, want explicit generated-name identity diagnostic", err)
 	}
 }
 
@@ -115,8 +133,8 @@ let afterResource =
         containers:
           - name: "migration"
             image: "busybox:1.37.0"
-let before = lifecycle.attach(beforeResource, ["before.create"], 0, true, [])
-let after = lifecycle.attach(afterResource, ["after.create"], 0, true, [])
+let before = lifecycle.withIdentity(lifecycle.attach(beforeResource, ["before.create"], 0, true, []), "before-hook")
+let after = lifecycle.withIdentity(lifecycle.attach(afterResource, ["after.create"], 0, true, []), "after-hook")
 emit before
 emit after
 `)

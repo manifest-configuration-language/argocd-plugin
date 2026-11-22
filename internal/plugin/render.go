@@ -111,11 +111,10 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 					return err
 				}
 				if resourceID.generatedName {
-					if artifact.ArtifactID != "" {
-						resourceID.key += "\x00generated\x00" + artifact.ArtifactID
-					} else {
-						resourceID.key += "\x00generated\x00" + operation.name + "\x00artifact-index\x00" + strconv.Itoa(artifact.BundleIndex)
+					if artifact.ArtifactID == "" {
+						return errors.New("a generated-name lifecycle resource requires lifecycle.withIdentity with a stable key")
 					}
+					resourceID.key += "\x00generated\x00" + artifact.ArtifactID
 				}
 				applyDestinationNamespace(object, resourceID.scope, resourceID.namespace)
 				identity := resourceID.key

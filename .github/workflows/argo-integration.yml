@@ -9,31 +9,62 @@ permissions:
   contents: read
 
 concurrency:
-  group: integration-${{ github.sha }}
-  cancel-in-progress: true
+  group: integration-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   cmp:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       E2E_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       E2E_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      MCL_PLUGIN_IMAGE: mcl-argocd:e2e
     steps:
       - uses: actions/checkout@v4.4.0
         with:
           persist-credentials: false
-      - uses: helm/kind-action@v1.14.0
+      - uses: actions/setup-go@v5.5.0
         with:
-          cluster_name: mcl-argocd-e2e
+          go-version-file: go.mod
+      - uses: azure/setup-kubectl@v4.0.0
+        with:
+          version: v1.32.0
+      - name: Create kind cluster
+        run: go tool kind create cluster --name mcl-argocd-e2e --image kindest/node:v1.32.0@sha256:c48c62eac5da28cdadcf560d1d8616cfa6783b58f0d94cf63ad1bf49600cb027 --wait 5m
       - uses: docker/setup-buildx-action@v3.12.0
       - uses: docker/build-push-action@v6.19.2
         with:
           context: .
           platforms: linux/amd64
-          tags: mcl-argocd:e2e
+          tags: ${{ env.MCL_PLUGIN_IMAGE }}
           load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - run: kind load docker-image mcl-argocd:e2e --name mcl-argocd-e2e
-      - run: bash e2e/argo-cd-integration.sh
+      - name: Load plugin image into kind
+        run: go tool kind load docker-image "$MCL_PLUGIN_IMAGE" --name mcl-argocd-e2e
+      - name: Install Argo CD and the MCL plugin
+        run: |
+          set -euo pipefail
+          kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply --server-side --force-conflicts -n argocd \
+            -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.1/manifests/install.yaml
+          kubectl wait -n argocd --for=condition=Available deployment/argocd-repo-server --timeout=5m
+          patch_file="$(mktemp)"
+          trap 'rm -f "$patch_file"' EXIT
+          sed "s#ghcr.io/manifest-configuration-language/argocd-plugin:v0.1.0#$MCL_PLUGIN_IMAGE#" \
+            examples/install/kustomize/argocd-repo-server-patch.yaml > "$patch_file"
+          kubectl patch -n argocd deployment/argocd-repo-server \
+            --type=strategic --patch-file "$patch_file"
+          kubectl rollout status -n argocd deployment/argocd-repo-server --timeout=5m
+      - name: Run E2E tests
+        env:
+          E2E_RUN: "1"
+        run: go test ./e2e -count=1 -timeout 20m -v
+      - name: Collect cluster diagnostics
+        if: ${{ failure() }}
+        run: |
+          go tool kind get clusters
+          kubectl get pods,deployments,jobs -A -o wide || true
+          kubectl get events -A --sort-by=.metadata.creationTimestamp || true
+          kubectl logs -n argocd deployment/argocd-repo-server --all-containers=true --tail=200 || true

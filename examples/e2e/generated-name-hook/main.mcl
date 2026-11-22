@@ -14,7 +14,7 @@ let migration =
           - name: "generated-hook"
             image: "busybox:1.37.0"
             command: ["sh", "-c", "echo generated-hook"]
-let beforeHook = lifecycle.attach(migration, ["before.create"], 0, true, ["on-success"])
+let beforeHook = lifecycle.withIdentity(lifecycle.attach(migration, ["before.create"], 0, true, ["on-success"]), "before-migration")
 let postMigration =
   apiVersion: "batch/v1"
   kind: "Job"
@@ -32,6 +32,6 @@ let postMigration =
           - name: "generated-hook"
             image: "busybox:1.37.0"
             command: ["sh", "-c", "echo generated-post-hook"]
-let afterHook = lifecycle.attach(postMigration, ["after.create"], 0, true, ["on-success"])
+let afterHook = lifecycle.withIdentity(lifecycle.attach(postMigration, ["after.create"], 0, true, ["on-success"]), "after-migration")
 emit beforeHook
 emit afterHook
