@@ -251,6 +251,19 @@ func listInputFilesFrom(ctx context.Context, root, encodedParameters, sourcePath
 			return fmt.Errorf("input path %q contains the reserved path separator ';'", parameterFile)
 		}
 		inputs[filepath.ToSlash(filepath.Clean(parameterFile))] = struct{}{}
+		resolvedParameterFile, err := projectFile(root, parameterFile)
+		if err != nil {
+			return err
+		}
+		relativeParameterFile, err := filepath.Rel(root, resolvedParameterFile)
+		if err != nil {
+			return fmt.Errorf("resolve parameter input path %q: %w", parameterFile, err)
+		}
+		relativeParameterFile = filepath.ToSlash(relativeParameterFile)
+		if strings.Contains(relativeParameterFile, ";") {
+			return fmt.Errorf("input path %q contains the reserved path separator ';'", relativeParameterFile)
+		}
+		inputs[relativeParameterFile] = struct{}{}
 	}
 	for _, operation := range operationsFor(options) {
 		_, readFiles, err := evaluateWithReadFiles(ctx, entry, operation.name, parameters, evaluationOptions)

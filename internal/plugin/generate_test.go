@@ -359,22 +359,31 @@ func TestListInputFilesIncludesMCLAndParameterInputs(t *testing.T) {
 	root := t.TempDir()
 	writeProjectFile(t, root, "mcl.toml", "")
 	writeProjectFile(t, root, "apps/worker/main.mcl", `import "../../cluster.mcl" as cluster
+import "./cluster-link.mcl" as linked
 let resource =
   apiVersion: "v1"
   kind: "ConfigMap"
   metadata:
     name: cluster.name
+  data:
+    value: linked.name
 emit resource
 `)
 	writeProjectFile(t, root, "cluster.mcl", `export let name = "worker"
 `)
-	writeProjectFile(t, root, "apps/worker/params.json", `{}`)
+	if err := os.Symlink("../../cluster.mcl", filepath.Join(root, "apps/worker/cluster-link.mcl")); err != nil {
+		t.Fatal(err)
+	}
+	writeProjectFile(t, root, "apps/worker/params-data.json", `{}`)
+	if err := os.Symlink("params-data.json", filepath.Join(root, "apps/worker/params.json")); err != nil {
+		t.Fatal(err)
+	}
 	var output bytes.Buffer
 	parameters := `[{"name":"parameter-files","array":["params.json"]}]`
 	if err := listInputFilesFrom(t.Context(), filepath.Join(root, "apps/worker"), parameters, "apps/worker", &output); err != nil {
 		t.Fatalf("listInputFilesFrom() error = %v", err)
 	}
-	inputs := []string{"main.mcl", "params.json", "../../cluster.mcl", "../../mcl.toml"}
+	inputs := []string{"main.mcl", "params.json", "params-data.json", "../../cluster.mcl", "../../apps/worker/cluster-link.mcl", "../../mcl.toml"}
 	for _, input := range inputs {
 		if !strings.Contains(output.String(), input) {
 			t.Errorf("input list %s does not contain input %q", output.String(), input)
@@ -439,6 +448,25 @@ emit resource
 		writeProjectFile(t, root, "params;data.json", `{}
 `)
 		assertInputPathSeparatorRejected(t, root, `[{"name":"parameter-files","array":["params;data.json"]}]`)
+	})
+
+	t.Run("parameter symlink target", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeProjectFile(t, root, "main.mcl", `let resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "worker"
+emit resource
+`)
+		writeProjectFile(t, root, "params;data.json", `{}
+`)
+		if err := os.Symlink("params;data.json", filepath.Join(root, "params.json")); err != nil {
+			t.Fatal(err)
+		}
+		assertInputPathSeparatorRejected(t, root, `[{"name":"parameter-files","array":["params.json"]}]`)
 	})
 }
 
