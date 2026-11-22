@@ -50,8 +50,6 @@ jobs:
           kubectl apply --server-side --force-conflicts -n argocd \
             -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.1/manifests/install.yaml
           kubectl wait -n argocd --for=condition=Available deployment/argocd-repo-server --timeout=5m
-          kubectl patch configmap argocd-cmd-params-cm -n argocd --type merge \
-            --patch '{"data":{"reposerver.plugin.use.manifest.generate.paths":"true"}}'
           patch_file="$(mktemp)"
           trap 'rm -f "$patch_file"' EXIT
           sed "s#ghcr.io/manifest-configuration-language/argocd-plugin:v0.1.1#$MCL_PLUGIN_IMAGE#" \

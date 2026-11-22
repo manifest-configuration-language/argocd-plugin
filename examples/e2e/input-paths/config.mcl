@@ -1,2 +1,0 @@
-export let name = "mcl-e2e-input-paths"
-export let value = "tracked"
