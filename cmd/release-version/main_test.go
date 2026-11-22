@@ -43,6 +43,38 @@ func TestDetermineTarget(t *testing.T) {
 		}
 	})
 
+	t.Run("reuses stable and RC tags on the same commit", func(t *testing.T) {
+		t.Parallel()
+
+		root, _ := newReleaseRepository(t)
+		currentSHA := commitReleaseFile(t, root, "candidate")
+		git(t, root, "tag", "v0.1.1-rc.1", currentSHA)
+
+		gotStable, err := determineTarget(t.Context(), root, currentSHA, release.BumpPatch, release.ChannelStable)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := (target{version: "0.1.1", tag: "v0.1.1"}); gotStable != want {
+			t.Fatalf("stable target before tagging = %+v, want %+v", gotStable, want)
+		}
+
+		git(t, root, "tag", "v0.1.1", currentSHA)
+		gotRC, err := determineTarget(t.Context(), root, currentSHA, release.BumpPatch, release.ChannelRC)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := (target{version: "0.1.1-rc.1", tag: "v0.1.1-rc.1"}); gotRC != want {
+			t.Fatalf("RC target after stable tagging = %+v, want %+v", gotRC, want)
+		}
+		gotStable, err = determineTarget(t.Context(), root, currentSHA, release.BumpPatch, release.ChannelStable)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := (target{version: "0.1.1", tag: "v0.1.1"}); gotStable != want {
+			t.Fatalf("stable target after tagging = %+v, want %+v", gotStable, want)
+		}
+	})
+
 	t.Run("rejects commit older than latest stable", func(t *testing.T) {
 		t.Parallel()
 
