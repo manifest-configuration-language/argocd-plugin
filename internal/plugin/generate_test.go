@@ -401,6 +401,39 @@ emit resource
 	}
 }
 
+func TestListInputFilesIncludesSymlinkedSchemaAndTarget(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	source := filepath.Join(root, "apps", "worker")
+	writeProjectFile(t, root, "mcl.toml", "")
+	writeProjectFile(t, root, "apps/worker/main.mcl", `type Resource = schema("./schema.json")
+let resource: Resource =
+  apiVersion: "v1"
+  kind: "ConfigMap"
+  metadata:
+    name: "worker"
+emit resource
+`)
+	writeProjectFile(t, root, "apps/worker/schemas/resource.json", `{"type":"object"}`)
+	if err := os.Symlink("schemas/resource.json", filepath.Join(source, "schema.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := mcl.UpdateFileWithParametersAndOptionsContext(t.Context(), filepath.Join(source, "main.mcl"), nil, mcl.EvaluationOptions{}); err != nil {
+		t.Fatalf("create MCL lockfile fixture: %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := listInputFilesFrom(t.Context(), source, "[]", "apps/worker", &output); err != nil {
+		t.Fatalf("listInputFilesFrom() error = %v", err)
+	}
+	for _, input := range []string{"../../apps/worker/schema.json", "../../apps/worker/schemas/resource.json"} {
+		if !strings.Contains(output.String(), input) {
+			t.Errorf("input list %q does not contain symlink input %q", output.String(), input)
+		}
+	}
+}
+
 func TestListInputFilesNormalizesParameterPaths(t *testing.T) {
 	t.Parallel()
 
