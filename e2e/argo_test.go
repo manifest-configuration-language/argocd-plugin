@@ -485,6 +485,7 @@ func (s *suite) gitAuthentication(t *testing.T) {
 	privateURL := baseURL + "/private.git"
 	application := t.TempDir()
 	applicationRevision := initializeGitTestRepository(t, application, applicationURL, gitAuthApplicationUser, gitAuthApplicationPass, map[string]string{
+		".gitignore":          ".mcl/\n",
 		"schemas/widget.yaml": widgetCRDSchema,
 	})
 	private := t.TempDir()
