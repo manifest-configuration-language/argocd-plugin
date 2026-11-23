@@ -1,5 +1,11 @@
-# MCL SDKバージョン
+# MCL SDKとLockの互換性
 
-Pluginイメージは、ルートの`go.mod`に固定したMCL SDKを使用します。MCL SDKの更新は通常の依存更新として行い、公開するPluginイメージは常に単一です。
+Pluginイメージは、ルートの`go.mod`で固定した単一のMCL SDKを組み込みます。旧SDK専用イメージやApplicationごとのSDK切替は提供しません。
 
-MCLプロジェクトの`mcl.lock`は、評価に使うMCL SDKとToolchainのバージョンをPluginのSDKに合わせてください。Pluginはレンダリング中にLockを更新しません。不一致がある場合は、MCL側でLockを更新してからApplicationを同期してください。
+`mcl.lock`の`version`はLockのファイル形式を識別します。Pluginが組み込むMCL SDKで読めるLock形式であれば、Lockに記録されたMCL、Go、Helm、Kustomizeのバージョンと実行中のツールチェーンが異なっても利用できます。これらの値は診断用の記録であり、同期を拒否する条件ではありません。依存するManifest、Chart、Gitソースなどは、Lockに固定されたDigestで引き続き検証されます。
+
+現在のMCL SDKはLock形式v1からv4を読み取ります。新しいLock形式が導入された場合は、SDKの対応状況によって利用可否が決まります。MCLの最低SemVerを固定してLockの互換性を判断することはしません。
+
+MCLのソースコードはPluginに組み込んだSDKの言語仕様で評価します。より新しいCLIに導入された構文や関数を、古いSDKが解釈できる保証はありません。その場合はPluginのMCL SDK依存を更新してください。MCLを更新しただけで、すべてのManifestの出力内容が一致する保証もありません。
+
+MCL SDKはGo Modulesの通常の依存更新としてRenovateで追跡します。新しい正式タグへの依存更新PRでPluginのUnit TestとArgo CD統合テストを検証し、Pluginイメージをリリースします。レンダリング中にMCL SDKをダウンロードしたり、Lockを書き換えたりすることはありません。

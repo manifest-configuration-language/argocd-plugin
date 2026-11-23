@@ -10,7 +10,7 @@ import (
 	"github.com/manifest-configuration-language/mcl/pkg/mcl"
 )
 
-func TestGenerateUsesMCLToolchainLockAndSharedCache(t *testing.T) {
+func TestGenerateUsesMCLDependencyLockAndSharedCache(t *testing.T) {
 	root := t.TempDir()
 	lockPath := filepath.Join(root, "mcl.lock")
 	entry := filepath.Join(root, "main.mcl")
@@ -54,7 +54,11 @@ emit resource
 	if err := os.WriteFile(lockPath, lock, 0o600); err != nil { // #nosec G703 -- lockPath uses a fixed filename inside t.TempDir.
 		t.Fatal(err)
 	}
-	if err := generateFrom(t.Context(), root, "[]", &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "dependency lock toolchain does not match") {
-		t.Fatalf("generateFrom() error = %v, want a clear incompatible toolchain diagnostic", err)
+	var replay bytes.Buffer
+	if err := generateFrom(t.Context(), root, "[]", &replay); err != nil {
+		t.Fatalf("generateFrom() rejected a supported lock format due to an older MCL version: %v", err)
+	}
+	if replay.String() != output.String() {
+		t.Fatalf("manifest changed when only the recorded toolchain version changed: first=%q second=%q", output.String(), replay.String())
 	}
 }
