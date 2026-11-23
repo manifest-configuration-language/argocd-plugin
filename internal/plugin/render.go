@@ -114,6 +114,9 @@ func generateFrom(ctx context.Context, root, encodedParameters string, output io
 					if artifact.ArtifactID == "" {
 						return errors.New("a generated-name lifecycle resource requires lifecycle.withIdentity with a stable key")
 					}
+					if slices.Contains(artifact.Lifecycle.Cleanup, "before-next-run") {
+						return errors.New("MCL cleanup policy \"before-next-run\" cannot be used with metadata.generateName; use \"on-success\" or \"on-failure\"")
+					}
 					resourceID.key += "\x00generated\x00" + artifact.ArtifactID
 				}
 				applyDestinationNamespace(object, resourceID.scope, resourceID.namespace)

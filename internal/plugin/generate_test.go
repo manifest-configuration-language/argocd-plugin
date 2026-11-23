@@ -103,6 +103,24 @@ emit hook
 	}
 }
 
+func TestGenerateRejectsBeforeHookCreationForGeneratedNameHook(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeProjectFile(t, root, "main.mcl", `let hookResource =
+  apiVersion: "batch/v1"
+  kind: "Job"
+  metadata:
+    generateName: "migration-"
+let hook = lifecycle.withIdentity(lifecycle.attach(hookResource, ["before.create"], 0, true, ["before-next-run"]), "migration-hook")
+emit hook
+`)
+	err := generateFrom(t.Context(), root, "[]", &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), `before-next-run" cannot be used with metadata.generateName`) {
+		t.Fatalf("generateFrom() error = %v, want generated-name cleanup diagnostic", err)
+	}
+}
+
 func TestGenerateKeepsGeneratedNameHooksWithSamePrefixDistinct(t *testing.T) {
 	t.Parallel()
 
