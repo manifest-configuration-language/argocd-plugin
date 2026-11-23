@@ -169,6 +169,8 @@ github.com/manifest-configuration-language/mcl v0.4.8-0.20261123001657-770d19fa2
 github.com/manifest-configuration-language/mcl v0.4.8-0.20261123001657-770d19fa2ba4/go.mod h1:HE787r6aEO3AIBKr8AMg9Vf9c/6l6f66ugdA4+rPj9A=
 github.com/manifest-configuration-language/mcl v0.4.8-0.20261123002020-a9c5be4614d3 h1:t1uzuH+emqGHH230d2zoSulePZTOtHCbFaSfK5Nf3ow=
 github.com/manifest-configuration-language/mcl v0.4.8-0.20261123002020-a9c5be4614d3/go.mod h1:HE787r6aEO3AIBKr8AMg9Vf9c/6l6f66ugdA4+rPj9A=
+github.com/manifest-configuration-language/mcl v0.4.8-0.20261123003559-d6e856fd7ca1 h1:+A9RorOocn3g5YddayzU4ksmXYRs+3pkmZXraiKcpA4=
+github.com/manifest-configuration-language/mcl v0.4.8-0.20261123003559-d6e856fd7ca1/go.mod h1:HE787r6aEO3AIBKr8AMg9Vf9c/6l6f66ugdA4+rPj9A=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/mitchellh/copystructure v1.2.0 h1:vpKXTN4ewci03Vljg/q9QvCGUDttBOGBIa15WveJJGw=
