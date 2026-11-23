@@ -1,14 +1,11 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
-  "dependencyDashboard": true,
-  "gomod": {
-    "enabled": true
-  },
-  "dockerfile": {
-    "enabled": true
-  },
-  "github-actions": {
-    "enabled": true
-  }
+  "extends": ["github>manifest-configuration-language/renovate-config"],
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/manifest-configuration-language/mcl"],
+      "automerge": false
+    }
+  ]
 }

@@ -89,10 +89,12 @@ Argo CD v3.6.1はAnnotationに記載された個々のパスだけをCMPへ送�
 
 既定ではGit認証情報を共有せず、ファイル実行権限を保持しません。MCLのLockファイルに固定された依存だけを取得し、レンダリング中にLockを更新しません。評価には10分の上限を設けています。Git認証が必要な場合の有効化方法とアクセス範囲は[セキュリティ設定](docs/security.md#git認証)を参照してください。
 
-イメージはMCLの依存コミットとArgo CD v3.6.1を固定してビルドします。リリースworkflowはlinux/amd64とlinux/arm64のマルチアーキテクチャイメージをGHCRへ公開し、SBOM、BuildKit Provenance、GitHub Artifact Attestationを生成します。
+イメージには`go.mod`で固定したMCL SDKを組み込みます。対応するLock形式はMCL SDKの実装が決定し、Lock生成時のMCL・Go・Helm・Kustomizeバージョンの完全一致は要求しません。Argo CD v3.6.1との統合テストを実施します。リリースworkflowはlinux/amd64とlinux/arm64のマルチアーキテクチャイメージをGHCRへ公開し、SBOM、BuildKit Provenance、GitHub Artifact Attestationを生成します。
+
+公開済みGitHub Releaseとコンテナイメージは不変の成果物として扱います。通常のRelease Workflowは既存Releaseの再作成をスキップします。GHCR上の成果物を誤って削除した場合は、同じバージョンを自動再発行せず、元のDigestと署名を確認して手動で復旧するか、新しいバージョンをリリースしてください。
 
 ## OpenTelemetry
 
 Argo CD v3.6.1のCMP ServerからOTLP Traceを送信する方法は[OpenTelemetry設定](docs/observability.md)を参照してください。
 
-同じArgo CDで異なるMCL Toolchainを使うSidecar構成は[MCL SDKバージョン設定](docs/mcl-versions.md)を参照してください。
+MCL CLIとPluginのバージョンに関する考え方は[SDKとLockの互換性](docs/mcl-versions.md)を参照してください。
