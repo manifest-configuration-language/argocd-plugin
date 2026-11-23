@@ -1,6 +1,6 @@
 module github.com/manifest-configuration-language/argocd-plugin
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/manifest-configuration-language/mcl v0.4.8-0.20261123100341-30e3347d10d8

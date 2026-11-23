@@ -42,8 +42,6 @@ jobs:
           key: go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-cache-paths.outputs.version }}-${{ hashFiles('go.mod', 'go.sum', '**/*.go') }}
           restore-keys: |
             go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-cache-paths.outputs.version }}-
-      - name: Resolve MCL SDK checksums
-        run: go mod download -json github.com/manifest-configuration-language/mcl@v0.4.8-0.20261123100341-30e3347d10d8
       - parallel:
           - name: Go tests
             timeout-minutes: 20
