@@ -182,6 +182,7 @@ jobs:
           export E2E_GIT_AUTH_ADMIN_URL=https://127.0.0.1:8443
           export E2E_GIT_AUTH_CA_FILE="$RUNNER_TEMP/git-test.crt"
           export MCL_DANGEROUS_ALLOWED_PRIVATE_DESTINATIONS=127.0.0.1/32:8443
+          export MCL_EXTERNAL_CA_FILE="$E2E_GIT_AUTH_CA_FILE"
           curl --cacert "$E2E_GIT_AUTH_CA_FILE" --retry 60 --retry-delay 2 --retry-all-errors \
             --silent --show-error --fail "$E2E_GIT_AUTH_ADMIN_URL/healthz" >/dev/null
           go test ./e2e -count=1 -timeout 20m -v
