@@ -559,8 +559,8 @@ func (s *suite) gitAuthentication(t *testing.T) {
 	privateRevision := initializeGitTestRepository(t, private, privatePushURL, gitAuthPrivateUser, gitAuthPrivatePass, map[string]string{
 		"schemas/widget.yaml": strings.Replace(widgetCRDSchema, "value:\n", "value:\n                  description: private fixture\n", 1),
 	})
-	writeGitProject(t, application, "success", applicationURL, applicationRevision, gitAuthApplicationUser, gitAuthApplicationPass, widgetManifest("mcl-git-auth-success"))
-	writeGitProject(t, application, "denied", privateURL, privateRevision, gitAuthPrivateUser, gitAuthPrivatePass, widgetManifest("mcl-git-auth-denied"))
+	writeGitProject(t, application, "success", applicationURL, applicationPushURL, applicationRevision, gitAuthApplicationUser, gitAuthApplicationPass, widgetManifest("mcl-git-auth-success"))
+	writeGitProject(t, application, "denied", privateURL, privatePushURL, privateRevision, gitAuthPrivateUser, gitAuthPrivatePass, widgetManifest("mcl-git-auth-denied"))
 	applicationHead := runGit(t, application, gitAuthApplicationUser, gitAuthApplicationPass, "rev-parse", "HEAD")
 	runGit(t, application, gitAuthApplicationUser, gitAuthApplicationPass, "push", "origin", "HEAD:main")
 	createGitTestCRD(t, s)
@@ -699,7 +699,7 @@ func initializeGitTestRepository(t *testing.T, directory, remote, username, pass
 	return revision
 }
 
-func writeGitProject(t *testing.T, repository, directory, source, revision, username, password, manifest string) {
+func writeGitProject(t *testing.T, repository, directory, source, lockSource, revision, username, password, manifest string) {
 	t.Helper()
 	if !filepath.IsLocal(directory) || directory == "." {
 		t.Fatalf("Git project path %q must be local", directory)
@@ -711,9 +711,12 @@ func writeGitProject(t *testing.T, repository, directory, source, revision, user
 	if err := os.WriteFile(filepath.Join(project, "main.mcl"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	config := fmt.Sprintf("[[crd_schemas]]\nsource = %q\nrevision = %q\ndirectory = \"schemas\"\nfiles = [\"widget.yaml\"]\n", "git+"+source, revision)
+	configForSource := func(source string) string {
+		return fmt.Sprintf("[[crd_schemas]]\nsource = %q\nrevision = %q\ndirectory = \"schemas\"\nfiles = [\"widget.yaml\"]\n", "git+"+source, revision)
+	}
 	// #nosec G703 -- directory is constrained to a local path before constructing the fixture path.
-	if err := os.WriteFile(filepath.Join(project, "mcl.toml"), []byte(config), 0o600); err != nil {
+	configPath := filepath.Join(project, "mcl.toml")
+	if err := os.WriteFile(configPath, []byte(configForSource(lockSource)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	options := mcl.EvaluationOptions{
@@ -723,6 +726,22 @@ func writeGitProject(t *testing.T, repository, directory, source, revision, user
 	}
 	if err := mcl.UpdateFileWithParametersAndOptionsContext(t.Context(), filepath.Join(project, "main.mcl"), nil, options); err != nil {
 		t.Fatalf("create locked Git dependency for %s: %v", directory, err)
+	}
+	lockPath := filepath.Join(project, "mcl.lock")
+	lock, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("read locked Git dependency for %s: %v", directory, err)
+	}
+	if !strings.Contains(string(lock), lockSource) {
+		t.Fatalf("locked Git dependency for %s does not contain source %q", directory, lockSource)
+	}
+	lock = []byte(strings.ReplaceAll(string(lock), lockSource, source))
+	// #nosec G703 -- lockPath is inside the validated temporary project directory.
+	if err := os.WriteFile(lockPath, lock, 0o600); err != nil {
+		t.Fatalf("update locked Git dependency for %s: %v", directory, err)
+	}
+	if err := os.WriteFile(configPath, []byte(configForSource(source)), 0o600); err != nil {
+		t.Fatalf("update Git dependency source for %s: %v", directory, err)
 	}
 	runGit(t, repository, gitAuthApplicationUser, gitAuthApplicationPass, "add", ".")
 	runGit(t, repository, gitAuthApplicationUser, gitAuthApplicationPass, "commit", "-m", "add "+directory+" project")
