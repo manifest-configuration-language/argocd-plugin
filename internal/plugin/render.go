@@ -63,7 +63,7 @@ func Generate(ctx context.Context, encodedParameters string, output io.Writer) e
 
 func generateFrom(ctx context.Context, root, encodedParameters string, output io.Writer) error {
 	destinationNamespace := os.Getenv("ARGOCD_APP_NAMESPACE")
-	parameters, options, err := readParameters(encodedParameters, root)
+	parameters, options, err := readParametersWithEnvironment(encodedParameters, root, os.Environ())
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func listInputFilesFrom(ctx context.Context, root, encodedParameters, sourcePath
 		return fmt.Errorf("resolve source directory: %w", err)
 	}
 	root = canonicalRoot
-	parameters, options, err := readParameters(encodedParameters, root)
+	parameters, options, err := readParametersWithEnvironment(encodedParameters, root, os.Environ())
 	if err != nil {
 		return err
 	}

@@ -26,9 +26,28 @@ type pluginOptions struct {
 	parameterFiles    []string
 }
 
-const maxParameterFileSize = 64 << 20
+const (
+	maxParameterFileSize    = 64 << 20
+	argocdEnvironmentPrefix = "ARGOCD_ENV_"
+)
 
 func readParameters(encoded, root string) (map[string]jsontext.Value, pluginOptions, error) {
+	return readParametersWithEnvironment(encoded, root, nil)
+}
+
+func readParametersWithEnvironment(encoded, root string, environment []string) (map[string]jsontext.Value, pluginOptions, error) {
+	values, options, err := readParametersWithoutEnvironment(encoded, root)
+	if err != nil {
+		return nil, options, err
+	}
+	if err := mergeArgoEnvironmentParameters(values, environment); err != nil {
+		return nil, options, err
+	}
+
+	return values, options, nil
+}
+
+func readParametersWithoutEnvironment(encoded, root string) (map[string]jsontext.Value, pluginOptions, error) {
 	values := make(map[string]jsontext.Value)
 	options := pluginOptions{}
 	if strings.TrimSpace(encoded) == "" || strings.TrimSpace(encoded) == "null" {
@@ -164,6 +183,35 @@ func mergeParameters(dst, src map[string]jsontext.Value) error {
 			return fmt.Errorf("parameter %q is supplied more than once", name)
 		}
 		dst[name] = value
+	}
+
+	return nil
+}
+
+func mergeArgoEnvironmentParameters(values map[string]jsontext.Value, environment []string) error {
+	var variables []string
+	for _, variable := range environment {
+		if strings.HasPrefix(variable, argocdEnvironmentPrefix) {
+			variables = append(variables, variable)
+		}
+	}
+	slices.Sort(variables)
+	for _, variable := range variables {
+		name, value, found := strings.Cut(variable, "=")
+		if !found {
+			return errors.New("invalid Argo CD environment variable")
+		}
+		parameterName := strings.TrimPrefix(name, argocdEnvironmentPrefix)
+		if parameterName == "" {
+			return errors.New("argo cd environment variable name must not be empty")
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Errorf("encode Argo CD environment parameter %q: %w", parameterName, err)
+		}
+		if err := mergeParameters(values, map[string]jsontext.Value{parameterName: encoded}); err != nil {
+			return err
+		}
 	}
 
 	return nil

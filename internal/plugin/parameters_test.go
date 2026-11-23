@@ -29,6 +29,35 @@ func TestReadParametersMergesJSONInputsAndRejectsDuplicateKeys(t *testing.T) {
 	}
 }
 
+func TestReadParametersMapsArgoEnvironmentToStringParameters(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.mcl"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	values, _, err := readParametersWithEnvironment("", root, []string{
+		"ARGOCD_ENV_cluster=west",
+		"ARGOCD_ENV_empty=",
+		"ARGOCD_ENV_password=secret=value",
+		"ARGOCD_APP_NAME=application",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(values["cluster"]) != `"west"` || string(values["empty"]) != `""` || string(values["password"]) != `"secret=value"` {
+		t.Fatalf("Argo CD environment parameters = %v", values)
+	}
+	if _, exists := values["ARGOCD_APP_NAME"]; exists {
+		t.Fatal("readParametersWithEnvironment() exposed a non-user Argo CD variable")
+	}
+
+	_, _, err = readParametersWithEnvironment(`[{"name":"parameters","string":"{\"cluster\":\"east\"}"}]`, root, []string{"ARGOCD_ENV_cluster=west"})
+	if err == nil {
+		t.Fatal("readParametersWithEnvironment() accepted a duplicate environment parameter")
+	}
+}
+
 func TestProjectFileRejectsTraversalAndSymlinkEscape(t *testing.T) {
 	t.Parallel()
 

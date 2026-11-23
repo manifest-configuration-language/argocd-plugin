@@ -211,6 +211,12 @@ func (s *suite) create(t *testing.T, path string, auto, finalizer bool, other ..
 func (s *suite) createWithPluginParameters(t *testing.T, path string, auto, finalizer bool, pluginParameters []any, other ...string) *suite {
 	t.Helper()
 
+	return s.createWithPluginParametersAndEnv(t, path, auto, finalizer, pluginParameters, nil, other...)
+}
+
+func (s *suite) createWithPluginParametersAndEnv(t *testing.T, path string, auto, finalizer bool, pluginParameters, pluginEnv []any, other ...string) *suite {
+	t.Helper()
+
 	x := *s
 	x.t = t
 	source := func(p string, plugin bool) map[string]any {
@@ -223,6 +229,9 @@ func (s *suite) createWithPluginParameters(t *testing.T, path string, auto, fina
 			plugin := map[string]any{"name": "mcl"}
 			if pluginParameters != nil {
 				plugin["parameters"] = pluginParameters
+			}
+			if pluginEnv != nil {
+				plugin["env"] = pluginEnv
 			}
 			m["plugin"] = plugin
 		}
@@ -478,9 +487,16 @@ func (s *suite) parameters(t *testing.T) {
 			"array": []any{"parameters.json"},
 		},
 	}
-	x := s.createWithPluginParameters(t, "examples/e2e/parameters", false, true, pluginParameters)
+	pluginEnv := []any{
+		map[string]any{
+			"name":  "region",
+			"value": "west",
+		},
+	}
+	x := s.createWithPluginParametersAndEnv(t, "examples/e2e/parameters", false, true, pluginParameters, pluginEnv)
 	x.sync("", "", "Succeeded")
 	x.field(configmaps, "default", "mcl-e2e-parameters", "from parameter file", "data", "message")
+	x.field(configmaps, "default", "mcl-e2e-parameters", "west", "data", "region")
 	x.cleanup()
 	x.exists(configmaps, "default", "mcl-e2e-parameters", false)
 }

@@ -1,5 +1,6 @@
 param name: String
 param message: String
+param region: String
 
 let resource =
   apiVersion: "v1"
@@ -8,5 +9,6 @@ let resource =
     name: name
   data:
     message: message
+    region: region
 
 emit resource

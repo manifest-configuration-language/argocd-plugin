@@ -21,6 +21,9 @@ spec:
         path: '{{path}}'
         plugin:
           name: mcl
+          env:
+            - name: application
+              value: '{{path.basename}}'
       destination:
         server: https://kubernetes.default.svc
         namespace: default

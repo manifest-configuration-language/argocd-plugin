@@ -14,6 +14,23 @@ CMP Plugin名は`mcl`です。Applicationのsourceには`plugin: {}`を設定す
 
 Parameter Announcementの既定値はArgo CDから実行時パラメータとして渡らないため、プラグインが既定値を適用します。ファイルパスは相対パスに限定し、Symlinkを解決した後にソースディレクトリ内であることを検証します。重複キー、未知のPlugin Parameter、無効なJSONはエラーです。
 
+## Application Environment
+
+Applicationの`spec.source.plugin.env`で設定した環境変数は、Argo CDが`ARGOCD_ENV_`を付けてCMPへ渡します。プラグインは接頭辞を除いた名前をMCLのparameter名として扱い、値をStringとして評価します。例えば、`name: region`と`value: west`はMCLの`param region: String`へ渡されます。環境変数と`parameters`または`parameter-files`で同じparameterを設定するとエラーになります。
+
+ApplicationSetでは、Application templateからgeneratorの値を環境変数へ渡せます。
+
+```yaml
+spec:
+  source:
+    plugin:
+      env:
+        - name: application
+          value: '{{path.basename}}'
+```
+
+MCLのparameter名は環境変数名と一致させてください。環境変数の値はJSON値として解釈せずStringとして渡します。環境変数はログに出力しませんが、MCLコードから参照できるため、信頼できるRepositoryだけで使ってください。
+
 ## 入力ファイル追跡
 
 `mcl-argocd inputs`はMCL評価で読み込んだファイルと`parameter-files`をセミコロン区切りで出力します。このコマンドはUI Parameter Announcementではありません。出力は`argocd.argoproj.io/manifest-generate-paths`へ設定できます。Argo CDは相対パスをApplicationのsource pathから解決し、変更された入力に応じてApplicationの再調整を判断します。

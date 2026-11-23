@@ -1,8 +1,10 @@
+param application: String
+
 let configMap =
   apiVersion: "v1"
   kind: "ConfigMap"
   metadata:
-    name: "mcl-applicationset-sample"
+    name: application
   data:
     source: "ApplicationSet"
 emit configMap
