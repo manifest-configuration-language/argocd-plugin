@@ -2,6 +2,8 @@ package e2e
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -503,16 +505,32 @@ func (s *suite) parameters(t *testing.T) {
 
 func (s *suite) gitAuthentication(t *testing.T) {
 	baseURL := os.Getenv("E2E_GIT_AUTH_URL")
+	adminURL := os.Getenv("E2E_GIT_AUTH_ADMIN_URL")
 	parsedURL, err := url.Parse(baseURL)
-	if err != nil || parsedURL.Scheme != "https" || !strings.HasSuffix(strings.ToLower(parsedURL.Hostname()), ".trycloudflare.com") || parsedURL.User != nil || parsedURL.Path != "" || parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
-		t.Fatalf("E2E_GIT_AUTH_URL must be an HTTPS Cloudflare quick-tunnel origin")
+	if err != nil || parsedURL.Scheme != "https" || parsedURL.Host != "mcl-git-auth.argocd.svc.cluster.local:8443" || parsedURL.User != nil || parsedURL.Path != "" || parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
+		t.Fatalf("E2E_GIT_AUTH_URL must be the HTTPS origin of the in-cluster Git fixture")
 	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
+	adminParsedURL, err := url.Parse(adminURL)
+	if err != nil || adminParsedURL.Scheme != "https" || adminParsedURL.Host != "127.0.0.1:8443" || adminParsedURL.User != nil || adminParsedURL.Path != "" || adminParsedURL.RawQuery != "" || adminParsedURL.Fragment != "" {
+		t.Fatalf("E2E_GIT_AUTH_ADMIN_URL must be the port-forwarded HTTPS Git fixture origin")
+	}
+	// #nosec G703 -- The integration workflow sets this path to the generated CA file under RUNNER_TEMP.
+	ca, err := os.ReadFile(os.Getenv("E2E_GIT_AUTH_CA_FILE"))
+	if err != nil {
+		t.Fatalf("read Git fixture CA certificate: %v", err)
+	}
+	rootCAs := x509.NewCertPool()
+	if !rootCAs.AppendCertsFromPEM(ca) {
+		t.Fatal("Git fixture CA file contains no certificates")
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{RootCAs: rootCAs, MinVersion: tls.VersionTLS12}
+	t.Cleanup(func() { transport.CloseIdleConnections() })
+	client := &http.Client{Timeout: 10 * time.Second, Transport: transport}
 	deadline := time.Now().Add(time.Minute)
 	for {
-		// #nosec G704 -- The URL is restricted to the public HTTPS origin created for this CI run.
-		response, err := client.Get(baseURL + "/healthz")
+		// #nosec G704 -- adminURL is validated as the loopback endpoint exposed by the CI port-forward.
+		response, err := client.Get(adminURL + "/healthz")
 		if err == nil {
 			_ = response.Body.Close()
 			if response.StatusCode == http.StatusOK {
@@ -525,18 +543,20 @@ func (s *suite) gitAuthentication(t *testing.T) {
 		time.Sleep(250 * time.Millisecond)
 	}
 
-	createGitTestRepository(t, client, baseURL, "application.git")
-	createGitTestRepository(t, client, baseURL, "private.git")
+	createGitTestRepository(t, client, adminURL, "application.git")
+	createGitTestRepository(t, client, adminURL, "private.git")
 
 	applicationURL := baseURL + "/application.git"
 	privateURL := baseURL + "/private.git"
+	applicationPushURL := adminURL + "/application.git"
+	privatePushURL := adminURL + "/private.git"
 	application := t.TempDir()
-	applicationRevision := initializeGitTestRepository(t, application, applicationURL, gitAuthApplicationUser, gitAuthApplicationPass, map[string]string{
+	applicationRevision := initializeGitTestRepository(t, application, applicationPushURL, gitAuthApplicationUser, gitAuthApplicationPass, map[string]string{
 		".gitignore":          ".mcl/\n",
 		"schemas/widget.yaml": widgetCRDSchema,
 	})
 	private := t.TempDir()
-	privateRevision := initializeGitTestRepository(t, private, privateURL, gitAuthPrivateUser, gitAuthPrivatePass, map[string]string{
+	privateRevision := initializeGitTestRepository(t, private, privatePushURL, gitAuthPrivateUser, gitAuthPrivatePass, map[string]string{
 		"schemas/widget.yaml": strings.Replace(widgetCRDSchema, "value:\n", "value:\n                  description: private fixture\n", 1),
 	})
 	writeGitProject(t, application, "success", applicationURL, applicationRevision, gitAuthApplicationUser, gitAuthApplicationPass, widgetManifest("mcl-git-auth-success"))
@@ -636,7 +656,7 @@ func createGitTestRepository(t *testing.T, client *http.Client, baseURL, name st
 	default:
 		t.Fatalf("unsupported Git test repository %q", name)
 	}
-	// #nosec G704 -- The URL is restricted to the public HTTPS origin created for this CI run.
+	// #nosec G704 -- The URL is restricted to the validated CI port-forward endpoint.
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+"/admin/repositories/"+path, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -785,6 +805,7 @@ func runGit(t *testing.T, directory, username, password string, args ...string) 
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=http.extraHeader",
 		"GIT_CONFIG_VALUE_0=Authorization: Basic "+credentials,
+		"GIT_SSL_CAINFO="+os.Getenv("E2E_GIT_AUTH_CA_FILE"),
 	)
 	output, err := command.CombinedOutput()
 	if err != nil {

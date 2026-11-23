@@ -49,13 +49,10 @@ jobs:
           docker buildx build --platform linux/amd64 --target git-e2e-server \
             --tag mcl-git-e2e-server:e2e --load .
           go tool kind load docker-image mcl-git-e2e-server:e2e --name mcl-argocd-e2e
-          docker buildx build --platform linux/amd64 \
-            --file e2e/gitserver/cloudflared.Dockerfile \
-            --tag mcl-cloudflared:e2e --load .
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
             -keyout "$RUNNER_TEMP/git-test.key" -out "$RUNNER_TEMP/git-test.crt" \
             -subj "/CN=mcl-git-auth.argocd.svc.cluster.local" \
-            -addext "subjectAltName=DNS:mcl-git-auth.argocd.svc.cluster.local"
+            -addext "subjectAltName=DNS:mcl-git-auth.argocd.svc.cluster.local,IP:127.0.0.1"
           kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret tls mcl-git-auth-tls -n argocd \
             --cert="$RUNNER_TEMP/git-test.crt" --key="$RUNNER_TEMP/git-test.key"
@@ -104,6 +101,7 @@ jobs:
           spec:
             selector:
               app: mcl-git-auth
+            clusterIP: 10.96.0.123
             ports:
               - name: https
                 port: 8443
@@ -117,6 +115,9 @@ jobs:
           kubectl apply --server-side --force-conflicts -n argocd \
             -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.1/manifests/install.yaml
           kubectl wait -n argocd --for=condition=Available deployment/argocd-repo-server --timeout=5m
+          kubectl create configmap argocd-tls-certs-cm -n argocd \
+            --from-file=mcl-git-auth.argocd.svc.cluster.local="$RUNNER_TEMP/git-test.crt" \
+            --dry-run=client -o yaml | kubectl apply -f -
           patch_file="$(mktemp)"
           trap 'rm -f "$patch_file"' EXIT
           sed "s#ghcr.io/manifest-configuration-language/argocd-plugin:v0.1.1#$MCL_PLUGIN_IMAGE#" \
@@ -138,6 +139,9 @@ jobs:
                       name: mcl-plugin-config
                   - name: mcl-askpass
                     emptyDir: {}
+                  - name: mcl-git-auth-tls
+                    secret:
+                      secretName: mcl-git-auth-tls
                 containers:
                   - name: argocd-repo-server
                     env:
@@ -150,6 +154,10 @@ jobs:
                     env:
                       - name: ARGOCD_ASK_PASS_SOCK
                         value: /var/run/mcl-askpass/argocd-git-ask-pass.sock
+                      - name: MCL_DANGEROUS_ALLOWED_PRIVATE_DESTINATIONS
+                        value: 10.96.0.123/32:8443
+                      - name: MCL_EXTERNAL_CA_FILE
+                        value: /etc/mcl/git-auth/tls.crt
                     volumeMounts:
                       - name: mcl-plugin-config
                         mountPath: /home/argocd/cmp-server/config/plugin.yaml
@@ -157,6 +165,9 @@ jobs:
                         readOnly: true
                       - name: mcl-askpass
                         mountPath: /var/run/mcl-askpass
+                      - name: mcl-git-auth-tls
+                        mountPath: /etc/mcl/git-auth
+                        readOnly: true
           '
           kubectl rollout status -n argocd deployment/argocd-repo-server --timeout=5m
       - name: Run E2E tests
@@ -166,26 +177,12 @@ jobs:
           set -euo pipefail
           kubectl port-forward -n argocd service/mcl-git-auth 8443:8443 > "$RUNNER_TEMP/git-port-forward.log" 2>&1 &
           port_forward_pid=$!
-          # MCL rejects private-address dependency hosts, so route the disposable fixture through a temporary public hostname.
-          docker run --detach --rm --network host --name mcl-git-auth-tunnel \
-            mcl-cloudflared:e2e tunnel --no-autoupdate --protocol http2 \
-            --url https://127.0.0.1:8443 --no-tls-verify
-          trap 'kill "$port_forward_pid" 2>/dev/null || true; docker stop mcl-git-auth-tunnel >/dev/null 2>&1 || true' EXIT
-          attempt=0
-          auth_url=""
-          until [ -n "$auth_url" ]; do
-            auth_url="$(docker logs mcl-git-auth-tunnel 2>&1 | grep -Eo 'https://[[:alnum:]-]+\.trycloudflare\.com' | head -n 1 || true)"
-            attempt=$((attempt + 1))
-            if [ "$attempt" -ge 40 ]; then
-              cat "$RUNNER_TEMP/git-port-forward.log"
-              docker logs mcl-git-auth-tunnel
-              exit 1
-            fi
-            sleep 1
-          done
-          export E2E_GIT_AUTH_URL="$auth_url"
-          curl --retry 60 --retry-delay 2 --retry-all-errors --silent --show-error --fail \
-            "$E2E_GIT_AUTH_URL/healthz" >/dev/null
+          trap 'kill "$port_forward_pid" 2>/dev/null || true' EXIT
+          export E2E_GIT_AUTH_URL=https://mcl-git-auth.argocd.svc.cluster.local:8443
+          export E2E_GIT_AUTH_ADMIN_URL=https://127.0.0.1:8443
+          export E2E_GIT_AUTH_CA_FILE="$RUNNER_TEMP/git-test.crt"
+          curl --cacert "$E2E_GIT_AUTH_CA_FILE" --retry 60 --retry-delay 2 --retry-all-errors \
+            --silent --show-error --fail "$E2E_GIT_AUTH_ADMIN_URL/healthz" >/dev/null
           go test ./e2e -count=1 -timeout 20m -v
       - name: Collect cluster diagnostics
         if: ${{ failure() }}
